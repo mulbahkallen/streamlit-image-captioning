@@ -84,7 +84,6 @@ def export_image(image, alt_tag):
 # Streamlit UI
 st.title("🖼️ SEO Image Alt Tag Generator (Supports Single & Multiple Images)")
 st.write("Upload images to generate AI-powered alt tags optimized for SEO!")
-st.write("Modern Practice Internal Tool")
 
 # User selects if they want to upload a single or multiple images
 upload_mode = st.radio("Choose Upload Mode:", ["Single Image", "Multiple Images"])
@@ -125,6 +124,7 @@ if uploaded_files:
 
             col.image(image, caption=uploaded_file.name, use_container_width=False, width=150)
 
+            # User input for SEO optimization
     keywords = st.text_input("🔑 Enter target keywords (comma-separated)").split(",")
     theme = st.text_input("🎨 Enter the theme of the photos")
 
@@ -139,8 +139,12 @@ if uploaded_files:
                 with st.spinner(f"✨ Optimizing Alt Tag for {uploaded_file.name}..."):
                     optimized_alt_tag = optimize_alt_tag_gpt4(basic_caption, keywords, theme)
 
+                # Get length of alt tag
+                alt_tag_length = len(optimized_alt_tag)
+
                 st.success(f"✅ Optimized Alt Tag for **{uploaded_file.name}**:")
                 st.write(optimized_alt_tag)
+                st.write(f"📝 **Alt Tag Length:** {alt_tag_length} characters")
 
                 # Export image with new filename
                 img_bytes, filename = export_image(image, optimized_alt_tag)
@@ -151,7 +155,7 @@ if uploaded_files:
     # Provide bulk download for multiple images
     zip_buffer.seek(0)
     st.download_button(
-        label="📥 Download All Images as ZIP",
+        label="📥 Download All Images",
         data=zip_buffer,
         file_name="optimized_images.zip",
         mime="application/zip"
