@@ -107,10 +107,10 @@ if uploaded_files:
                 st.session_state.image_captions[uploaded_file.name] = generate_caption_with_gpt4(image)
 
         # Display images - Small size for multiple images
-        if upload_mode == "Multiple Images":
-            st.image(image, caption=uploaded_file.name, use_column_width=False, width=150)
-        else:
-            st.image(image, caption="Uploaded Image", use_container_width=True)
+            if upload_mode == "Multiple Images":
+                st.image(image, caption=uploaded_file.name, use_container_width=False, width=100)
+            else:
+                st.image(image, caption="Uploaded Image", use_container_width=True)
 
     # User input for SEO optimization
     keywords = st.text_input("🔑 Enter target keywords (comma-separated)").split(",")
