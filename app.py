@@ -1,6 +1,6 @@
 import streamlit as st
 import torch
-from transformers import BlipProcessor, BlipForConditionalGeneration
+from transformers import AutoProcessor, AutoModelForCausalLM
 from PIL import Image
 import openai
 
@@ -11,17 +11,17 @@ except KeyError:
     st.error("🔑 OpenAI API Key is missing! Please add it in Streamlit Secrets.")
     st.stop()
 
-# Load BLIP model for image captioning
+# Load GIT Model for image captioning
 @st.cache_resource
-def load_blip_model():
-    model_name = "Salesforce/blip-image-captioning-base"
-    processor = BlipProcessor.from_pretrained(model_name)
-    model = BlipForConditionalGeneration.from_pretrained(model_name)
+def load_git_model():
+    model_name = "microsoft/git-base"
+    processor = AutoProcessor.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
     return processor, model, device
 
-processor, model, device = load_blip_model()
+processor, model, device = load_git_model()
 
 # Function to resize large images (reduces memory usage)
 def resize_image(image, max_size=(1024, 1024)):
@@ -29,15 +29,15 @@ def resize_image(image, max_size=(1024, 1024)):
     image.thumbnail(max_size)
     return image
 
-# Function to generate captions using BLIP
+# Function to generate captions using GIT
 def generate_caption(image):
-    """Generate a caption for an image using the BLIP model."""
+    """Generate a caption for an image using the GIT model."""
     inputs = processor(images=image, return_tensors="pt").to(device)
 
     with torch.no_grad():
-        output = model.generate(**inputs)
+        generated_ids = model.generate(**inputs)
 
-    caption = processor.decode(output[0], skip_special_tokens=True)
+    caption = processor.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
     return caption
 
 # Function to optimize alt text using GPT-4
