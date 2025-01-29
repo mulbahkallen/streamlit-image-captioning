@@ -3,6 +3,7 @@ import openai
 from PIL import Image
 import io
 import base64
+import os
 
 # Load OpenAI API key securely from Streamlit secrets
 api_key = st.secrets.get("OPENAI_API_KEY")
@@ -69,9 +70,22 @@ def optimize_alt_tag_gpt4(caption, keywords, theme):
 
     return response.choices[0].message.content.strip()
 
+# Function to export image with new alt tag as filename
+def export_image(image, alt_tag):
+    """Save the image with the optimized alt tag as the filename."""
+    alt_tag_cleaned = alt_tag.replace(" ", "_").replace(",", "").replace(".", "").replace("/", "").replace("\\", "")
+    filename = f"{alt_tag_cleaned}.png"
+    
+    # Save image to a BytesIO object for download
+    img_bytes = io.BytesIO()
+    image.save(img_bytes, format="PNG")
+    img_bytes.seek(0)
+    
+    return img_bytes, filename
+
 # Streamlit UI
 st.title("🖼️ SEO Image Alt Tag Generator (Powered by GPT-4 Turbo)")
-st.write("Upload an image to generate an AI-powered caption and optimize it for SEO!")
+st.write("Upload an image to generate an AI-powered alt tag optimized for SEO!")
 
 uploaded_file = st.file_uploader("📤 Upload an image", type=["jpg", "jpeg", "png"])
 
@@ -80,21 +94,32 @@ if uploaded_file:
 
     st.image(image, caption="Uploaded Image", use_container_width=True)
 
-    with st.spinner("🔍 Generating caption with GPT-4 Turbo..."):
+    with st.spinner("🔍 Generating alt tag with GPT-4 Turbo..."):
         basic_caption = generate_caption_with_gpt4(image)
-
-    st.success("✅ Caption Generated:")
-    st.write(basic_caption)
 
     # User input for SEO optimization
     keywords = st.text_input("🔑 Enter target keywords (comma-separated)").split(",")
     theme = st.text_input("🎨 Enter the theme of the photo")
 
-    if st.button("🚀 Optimize Alt Tag"):
+    if st.button("🚀 Generate Optimized Alt Tag"):
         if not keywords or not theme:
             st.warning("⚠️ Please enter both keywords and theme.")
         else:
             with st.spinner("✨ Optimizing Alt Tag..."):
                 optimized_alt_tag = optimize_alt_tag_gpt4(basic_caption, keywords, theme)
-            st.success("✅ Optimized Alt Tag:")
+            
+            # Get length of alt tag
+            alt_tag_length = len(optimized_alt_tag)
+
+            st.success("✅ Optimized Alt Tag Generated:")
             st.write(optimized_alt_tag)
+            st.write(f"📝 **Alt Tag Length:** {alt_tag_length} characters")
+
+            # Export image with new filename
+            img_bytes, filename = export_image(image, optimized_alt_tag)
+            st.download_button(
+                label="📥 Download Image with New Alt Tag",
+                data=img_bytes,
+                file_name=filename,
+                mime="image/png"
+            )
