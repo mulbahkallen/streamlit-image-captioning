@@ -2,6 +2,7 @@ import streamlit as st
 import openai
 from PIL import Image
 import io
+import base64
 
 # Load OpenAI API key securely from Streamlit secrets
 try:
@@ -10,14 +11,20 @@ except KeyError:
     st.error("🔑 OpenAI API Key is missing! Please add it in Streamlit Secrets.")
     st.stop()
 
+# Function to encode image as base64
+def encode_image_to_base64(image):
+    """Convert image to base64 string."""
+    img_bytes = io.BytesIO()
+    image.save(img_bytes, format="PNG")
+    img_base64 = base64.b64encode(img_bytes.getvalue()).decode("utf-8")
+    return img_base64
+
 # Function to get image caption using GPT-4 Vision
 def generate_caption_with_gpt4(image):
     """Send image to GPT-4V and get a description."""
     
-    # Convert image to bytes
-    img_bytes = io.BytesIO()
-    image.save(img_bytes, format="PNG")
-    img_bytes = img_bytes.getvalue()
+    # Convert image to base64
+    img_base64 = encode_image_to_base64(image)
 
     response = openai_client.chat.completions.create(
         model="gpt-4-vision-preview",  # GPT-4 with Vision
@@ -25,7 +32,7 @@ def generate_caption_with_gpt4(image):
             {"role": "system", "content": "You are an AI image captioning assistant."},
             {"role": "user", "content": [
                 {"type": "text", "text": "Describe this image in detail:"},
-                {"type": "image", "image": img_bytes}
+                {"type": "image_url", "image_url": f"data:image/png;base64,{img_base64}"}
             ]}
         ],
         max_tokens=150
