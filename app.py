@@ -3,7 +3,6 @@ import openai
 from PIL import Image
 import io
 import base64
-import os
 
 # Load OpenAI API key securely from Streamlit secrets
 api_key = st.secrets.get("OPENAI_API_KEY")
@@ -91,11 +90,12 @@ uploaded_file = st.file_uploader("📤 Upload an image", type=["jpg", "jpeg", "p
 
 if uploaded_file:
     image = Image.open(uploaded_file).convert('RGB')
-
     st.image(image, caption="Uploaded Image", use_container_width=True)
 
-    with st.spinner("🔍 Generating alt tag with GPT-4 Turbo..."):
-        basic_caption = generate_caption_with_gpt4(image)
+    # Only generate the caption ONCE and store it in session state
+    if "basic_caption" not in st.session_state:
+        with st.spinner("🔍 Generating alt tag with GPT-4 Turbo..."):
+            st.session_state.basic_caption = generate_caption_with_gpt4(image)
 
     # User input for SEO optimization
     keywords = st.text_input("🔑 Enter target keywords (comma-separated)").split(",")
@@ -106,7 +106,7 @@ if uploaded_file:
             st.warning("⚠️ Please enter both keywords and theme.")
         else:
             with st.spinner("✨ Optimizing Alt Tag..."):
-                optimized_alt_tag = optimize_alt_tag_gpt4(basic_caption, keywords, theme)
+                optimized_alt_tag = optimize_alt_tag_gpt4(st.session_state.basic_caption, keywords, theme)
             
             # Get length of alt tag
             alt_tag_length = len(optimized_alt_tag)
