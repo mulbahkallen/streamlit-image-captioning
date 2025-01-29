@@ -9,7 +9,7 @@ import torch
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # Load ViT-GPT2 model for image captioning
-model_name = "nlpconnect/vit-gpt2-image-captioning"
+model_name = "Salesforce/blip-image-captioning-base"
 model = VisionEncoderDecoderModel.from_pretrained(model_name)
 feature_extractor = ViTFeatureExtractor.from_pretrained(model_name)
 tokenizer = AutoTokenizer.from_pretrained(model_name)
