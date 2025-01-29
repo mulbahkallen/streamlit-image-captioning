@@ -6,7 +6,7 @@ import openai
 
 # Load OpenAI API key securely from Streamlit secrets
 try:
-    openai.api_key = st.secrets["OPENAI_API_KEY"]
+    openai_client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 except KeyError:
     st.error("🔑 OpenAI API Key is missing! Please add it in Streamlit Secrets.")
     st.stop()
@@ -33,7 +33,7 @@ def resize_image(image, max_size=(1024, 1024)):
 def generate_caption(image):
     """Generate a caption for an image using the BLIP model."""
     inputs = processor(images=image, return_tensors="pt").to(device)
-    
+
     with torch.no_grad():
         output = model.generate(**inputs)
 
@@ -50,14 +50,14 @@ def optimize_alt_tag_gpt4(caption, keywords, theme):
         f"Make the alt tag SEO-friendly, clear, and descriptive."
     )
 
-    response = openai.ChatCompletion.create(
+    response = openai_client.chat.completions.create(  # NEW: Updated API call
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=100,
         temperature=0.7
     )
 
-    return response["choices"][0]["message"]["content"].strip()
+    return response.choices[0].message.content.strip()
 
 # Streamlit UI
 st.title("🖼️ SEO Image Alt Tag Generator")
@@ -67,15 +67,15 @@ uploaded_file = st.file_uploader("📤 Upload an image", type=["jpg", "jpeg", "p
 
 if uploaded_file:
     image = Image.open(uploaded_file).convert('RGB')
-    
+
     # Resize if too large
     image = resize_image(image)
-    
+
     st.image(image, caption="Resized Image", use_container_width=True)
 
     with st.spinner("🔍 Generating caption..."):
         basic_caption = generate_caption(image)
-    
+
     st.success("✅ Caption Generated:")
     st.write(basic_caption)
 
