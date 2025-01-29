@@ -1,6 +1,6 @@
 import streamlit as st
 import torch
-from transformers import AutoProcessor, AutoModelForCausalLM
+from transformers import Blip2Processor, Blip2ForConditionalGeneration
 from PIL import Image
 import openai
 
@@ -11,17 +11,17 @@ except KeyError:
     st.error("🔑 OpenAI API Key is missing! Please add it in Streamlit Secrets.")
     st.stop()
 
-# Load GIT Model for image captioning
+# Load BLIP-2 Model (More Accurate Than BLIP-1)
 @st.cache_resource
-def load_git_model():
-    model_name = "microsoft/git-base"
-    processor = AutoProcessor.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name)
+def load_blip2_model():
+    model_name = "Salesforce/blip2-opt-2.7b"
+    processor = Blip2Processor.from_pretrained(model_name)
+    model = Blip2ForConditionalGeneration.from_pretrained(model_name, torch_dtype=torch.float16)  # Uses float16 for efficiency
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
     return processor, model, device
 
-processor, model, device = load_git_model()
+processor, model, device = load_blip2_model()
 
 # Function to resize large images (reduces memory usage)
 def resize_image(image, max_size=(1024, 1024)):
@@ -29,9 +29,9 @@ def resize_image(image, max_size=(1024, 1024)):
     image.thumbnail(max_size)
     return image
 
-# Function to generate captions using GIT
+# Function to generate captions using BLIP-2
 def generate_caption(image):
-    """Generate a caption for an image using the GIT model."""
+    """Generate a caption for an image using the BLIP-2 model."""
     inputs = processor(images=image, return_tensors="pt").to(device)
 
     with torch.no_grad():
@@ -60,7 +60,7 @@ def optimize_alt_tag_gpt4(caption, keywords, theme):
     return response.choices[0].message.content.strip()
 
 # Streamlit UI
-st.title("🖼️ SEO Image Alt Tag Generator")
+st.title("🖼️ SEO Image Alt Tag Generator (BLIP-2)")
 st.write("Upload an image to generate an AI-powered caption and optimize it for SEO!")
 
 uploaded_file = st.file_uploader("📤 Upload an image", type=["jpg", "jpeg", "png"])
