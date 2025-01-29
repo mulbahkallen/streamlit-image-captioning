@@ -5,6 +5,8 @@ import io
 import base64
 import zipfile
 import os
+import tkinter as tk
+from tkinter import filedialog
 
 # Load OpenAI API key securely from Streamlit secrets
 api_key = st.secrets.get("OPENAI_API_KEY")
@@ -68,22 +70,19 @@ def optimize_alt_tag_gpt4(caption, keywords, theme):
 
     return response.choices[0].message.content.strip()
 
-# Function to export image with new alt tag as filename
-def export_image(image, alt_tag):
-    """Save the image with the optimized alt tag as the filename."""
-    alt_tag_cleaned = alt_tag.replace(" ", "_").replace(",", "").replace(".", "").replace("/", "").replace("\\", "")
-    filename = f"{alt_tag_cleaned}.png"
-    
-    # Save image to a BytesIO object for download
-    img_bytes = io.BytesIO()
-    image.save(img_bytes, format="PNG")
-    img_bytes.seek(0)
-    
-    return img_bytes, filename
+# Function to open a folder selection dialog
+def select_folder():
+    """Opens a system dialog for selecting a folder."""
+    root = tk.Tk()
+    root.withdraw()  # Hide the root window
+    folder_path = filedialog.askdirectory(title="Select Destination Folder")
+    return folder_path
 
 # Streamlit UI
 st.title("🖼️ SEO Image Alt Tag Generator (Supports Single & Multiple Images)")
-st.write(" Modern Practice tool to upload images and generate alt tags optimized for SEO")
+st.write("Upload images to generate AI-powered alt tags optimized for SEO!")
+st.write("Modern Practice Internal Tool")
+
 
 # User selects if they want to upload a single or multiple images
 upload_mode = st.radio("Choose Upload Mode:", ["Single Image", "Multiple Images"])
@@ -91,8 +90,15 @@ upload_mode = st.radio("Choose Upload Mode:", ["Single Image", "Multiple Images"
 # Allow single or multiple image uploads based on user choice
 uploaded_files = st.file_uploader("📤 Upload images", type=["jpg", "jpeg", "png"], accept_multiple_files=(upload_mode == "Multiple Images"))
 
-# Destination folder selection
-destination_folder = st.text_input("📁 Enter destination folder for downloaded images (optional):")
+# Folder selection button
+if st.button("📂 Select Destination Folder"):
+    selected_folder = select_folder()
+    if selected_folder:
+        st.session_state["destination_folder"] = selected_folder
+
+# Display selected folder
+if "destination_folder" in st.session_state:
+    st.success(f"📁 Selected Destination Folder: {st.session_state['destination_folder']}")
 
 if uploaded_files:
     if upload_mode == "Single Image":
@@ -127,7 +133,6 @@ if uploaded_files:
 
             col.image(image, caption=uploaded_file.name, use_container_width=False, width=150)
 
-            # User input for SEO optimization
     keywords = st.text_input("🔑 Enter target keywords (comma-separated)").split(",")
     theme = st.text_input("🎨 Enter the theme of the photos")
 
@@ -142,12 +147,8 @@ if uploaded_files:
                 with st.spinner(f"✨ Optimizing Alt Tag for {uploaded_file.name}..."):
                     optimized_alt_tag = optimize_alt_tag_gpt4(basic_caption, keywords, theme)
 
-                # Get length of alt tag
-                alt_tag_length = len(optimized_alt_tag)
-
                 st.success(f"✅ Optimized Alt Tag for **{uploaded_file.name}**:")
                 st.write(optimized_alt_tag)
-                st.write(f"📝 **Alt Tag Length:** {alt_tag_length} characters")
 
                 # Export image with new filename
                 img_bytes, filename = export_image(image, optimized_alt_tag)
