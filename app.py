@@ -7,7 +7,7 @@ import base64
 openai_client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 
-# Load OpenAI API key securely from Streamlit secrets
+# Load OpenAI API key securely from Streamlit secrets 
 api_key = st.secrets.get("OPENAI_API_KEY")
 
 if not api_key or api_key == "your-api-key":
