@@ -19,15 +19,15 @@ def encode_image_to_base64(image):
     img_base64 = base64.b64encode(img_bytes.getvalue()).decode("utf-8")
     return img_base64
 
-# Function to get image caption using GPT-4 Vision
+# Function to get image caption using GPT-4 Turbo Vision
 def generate_caption_with_gpt4(image):
-    """Send image to GPT-4V and get a description."""
+    """Send image to GPT-4 Turbo Vision and get a description."""
     
     # Convert image to base64
     img_base64 = encode_image_to_base64(image)
 
     response = openai_client.chat.completions.create(
-        model="gpt-4-vision-preview",  # GPT-4 with Vision
+        model="gpt-4-turbo",  # ✅ UPDATED MODEL
         messages=[
             {"role": "system", "content": "You are an AI image captioning assistant."},
             {"role": "user", "content": [
@@ -40,9 +40,9 @@ def generate_caption_with_gpt4(image):
 
     return response.choices[0].message.content.strip()
 
-# Function to optimize alt text using GPT-4
+# Function to optimize alt text using GPT-4 Turbo
 def optimize_alt_tag_gpt4(caption, keywords, theme):
-    """Generate an SEO-optimized alt tag using GPT-4."""
+    """Generate an SEO-optimized alt tag using GPT-4 Turbo."""
     prompt = (
         f"Here is an image caption: '{caption}'.\n"
         f"The target keywords are: {', '.join(keywords)}.\n"
@@ -51,7 +51,7 @@ def optimize_alt_tag_gpt4(caption, keywords, theme):
     )
 
     response = openai_client.chat.completions.create(
-        model="gpt-4",
+        model="gpt-4-turbo",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=100,
         temperature=0.7
@@ -60,7 +60,7 @@ def optimize_alt_tag_gpt4(caption, keywords, theme):
     return response.choices[0].message.content.strip()
 
 # Streamlit UI
-st.title("🖼️ SEO Image Alt Tag Generator (Powered by GPT-4V)")
+st.title("🖼️ SEO Image Alt Tag Generator (Powered by GPT-4 Turbo)")
 st.write("Upload an image to generate an AI-powered caption and optimize it for SEO!")
 
 uploaded_file = st.file_uploader("📤 Upload an image", type=["jpg", "jpeg", "png"])
@@ -70,7 +70,7 @@ if uploaded_file:
 
     st.image(image, caption="Uploaded Image", use_container_width=True)
 
-    with st.spinner("🔍 Generating caption with GPT-4V..."):
+    with st.spinner("🔍 Generating caption with GPT-4 Turbo..."):
         basic_caption = generate_caption_with_gpt4(image)
 
     st.success("✅ Caption Generated:")
