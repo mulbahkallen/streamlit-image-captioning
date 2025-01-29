@@ -40,14 +40,20 @@ def generate_caption_with_gpt4(image):
 
     return response.choices[0].message.content.strip()
 
-# Function to optimize alt text using GPT-4 Turbo
+# Function to optimize alt text using GPT-4 Turbo (with SEO best practices)
 def optimize_alt_tag_gpt4(caption, keywords, theme):
-    """Generate an SEO-optimized alt tag using GPT-4 Turbo."""
+    """Generate an SEO-optimized alt tag using GPT-4 Turbo with best practices."""
     prompt = (
         f"Here is an image caption: '{caption}'.\n"
         f"The target keywords are: {', '.join(keywords)}.\n"
         f"The theme of the photos is: {theme}.\n"
-        f"Make the alt tag SEO-friendly, clear, and descriptive."
+        f"Please generate an optimized alt text following these SEO best practices:\n"
+        f"1️⃣ **Keep it concise**: Alt text should be under 100 characters.\n"
+        f"2️⃣ **Provide context**: Describe what the image means in the site's content.\n"
+        f"3️⃣ **Include relevant keywords** naturally, without stuffing.\n"
+        f"4️⃣ **Avoid unnecessary phrases** like 'image of' or 'picture of'.\n"
+        f"5️⃣ **Improve accessibility**: Ensure clarity for visually impaired users.\n"
+        f"Generate an optimized alt tag based on these guidelines."
     )
 
     response = openai_client.chat.completions.create(
