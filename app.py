@@ -1,8 +1,7 @@
 import streamlit as st
-import torch
-from transformers import Blip2Processor, Blip2ForConditionalGeneration
-from PIL import Image
 import openai
+from PIL import Image
+import io
 
 # Load OpenAI API key securely from Streamlit secrets
 try:
@@ -11,34 +10,28 @@ except KeyError:
     st.error("🔑 OpenAI API Key is missing! Please add it in Streamlit Secrets.")
     st.stop()
 
-# Load BLIP-2 Model (More Accurate Than BLIP-1)
-@st.cache_resource
-def load_blip2_model():
-    model_name = "Salesforce/blip2-opt-2.7b"
-    processor = Blip2Processor.from_pretrained(model_name)
-    model = Blip2ForConditionalGeneration.from_pretrained(model_name, torch_dtype=torch.float16)  # Uses float16 for efficiency
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model.to(device)
-    return processor, model, device
+# Function to get image caption using GPT-4 Vision
+def generate_caption_with_gpt4(image):
+    """Send image to GPT-4V and get a description."""
+    
+    # Convert image to bytes
+    img_bytes = io.BytesIO()
+    image.save(img_bytes, format="PNG")
+    img_bytes = img_bytes.getvalue()
 
-processor, model, device = load_blip2_model()
+    response = openai_client.chat.completions.create(
+        model="gpt-4-vision-preview",  # GPT-4 with Vision
+        messages=[
+            {"role": "system", "content": "You are an AI image captioning assistant."},
+            {"role": "user", "content": [
+                {"type": "text", "text": "Describe this image in detail:"},
+                {"type": "image", "image": img_bytes}
+            ]}
+        ],
+        max_tokens=150
+    )
 
-# Function to resize large images (reduces memory usage)
-def resize_image(image, max_size=(1024, 1024)):
-    """Resize the image to fit within max_size while maintaining aspect ratio."""
-    image.thumbnail(max_size)
-    return image
-
-# Function to generate captions using BLIP-2
-def generate_caption(image):
-    """Generate a caption for an image using the BLIP-2 model."""
-    inputs = processor(images=image, return_tensors="pt").to(device)
-
-    with torch.no_grad():
-        generated_ids = model.generate(**inputs)
-
-    caption = processor.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-    return caption
+    return response.choices[0].message.content.strip()
 
 # Function to optimize alt text using GPT-4
 def optimize_alt_tag_gpt4(caption, keywords, theme):
@@ -50,7 +43,7 @@ def optimize_alt_tag_gpt4(caption, keywords, theme):
         f"Make the alt tag SEO-friendly, clear, and descriptive."
     )
 
-    response = openai_client.chat.completions.create(  # NEW: Updated API call
+    response = openai_client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=100,
@@ -60,7 +53,7 @@ def optimize_alt_tag_gpt4(caption, keywords, theme):
     return response.choices[0].message.content.strip()
 
 # Streamlit UI
-st.title("🖼️ SEO Image Alt Tag Generator (BLIP-2)")
+st.title("🖼️ SEO Image Alt Tag Generator (Powered by GPT-4V)")
 st.write("Upload an image to generate an AI-powered caption and optimize it for SEO!")
 
 uploaded_file = st.file_uploader("📤 Upload an image", type=["jpg", "jpeg", "png"])
@@ -68,13 +61,10 @@ uploaded_file = st.file_uploader("📤 Upload an image", type=["jpg", "jpeg", "p
 if uploaded_file:
     image = Image.open(uploaded_file).convert('RGB')
 
-    # Resize if too large
-    image = resize_image(image)
+    st.image(image, caption="Uploaded Image", use_container_width=True)
 
-    st.image(image, caption="Resized Image", use_container_width=True)
-
-    with st.spinner("🔍 Generating caption..."):
-        basic_caption = generate_caption(image)
+    with st.spinner("🔍 Generating caption with GPT-4V..."):
+        basic_caption = generate_caption_with_gpt4(image)
 
     st.success("✅ Caption Generated:")
     st.write(basic_caption)
