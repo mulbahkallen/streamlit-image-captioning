@@ -83,8 +83,8 @@ def export_image(image, alt_tag):
     return img_bytes, filename
 
 # Streamlit UI
-st.title("🖼️ SEO Image Alt Tag Generator (Powered by GPT-4 Turbo)")
-st.write("Upload an image to generate an AI-powered alt tag optimized for SEO!")
+st.title("🖼️ SEO Image Alt Tag Generator (Internal Tool - Modern Practice)")
+st.write("Upload an image to generate an alt tag optimized for SEO!")
 
 uploaded_file = st.file_uploader("📤 Upload an image", type=["jpg", "jpeg", "png"])
 
