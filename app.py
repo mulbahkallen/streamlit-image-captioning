@@ -108,7 +108,7 @@ if uploaded_files:
 
         # Display images - Small size for multiple images
             if upload_mode == "Multiple Images":
-                st.image(image, caption=uploaded_file.name, use_container_width=False, width=100)
+                st.image(image, caption=uploaded_file.name, use_container_width=False, width=125)
             else:
                 st.image(image, caption="Uploaded Image", use_container_width=True)
 
