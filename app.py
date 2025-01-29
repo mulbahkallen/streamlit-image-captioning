@@ -82,8 +82,8 @@ def export_image(image, alt_tag):
     return img_bytes, filename
 
 # Streamlit UI
-st.title("🖼️ SEO Image Alt Tag Generator (Supports Single & Multiple Images)")
-st.write("Upload images to generate AI-powered alt tags optimized for SEO!")
+st.title("🖼️ SEO Image Alt Tag Generator")
+st.write("Upload images to generate alt tags optimized for SEO!")
 st.write("Modern Practice Internal Tool Only")
 
 
