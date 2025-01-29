@@ -27,12 +27,12 @@ def generate_caption_with_gpt4(image):
     img_base64 = encode_image_to_base64(image)
 
     response = openai_client.chat.completions.create(
-        model="gpt-4-turbo",  # ✅ UPDATED MODEL
+        model="gpt-4-turbo",
         messages=[
             {"role": "system", "content": "You are an AI image captioning assistant."},
             {"role": "user", "content": [
                 {"type": "text", "text": "Describe this image in detail:"},
-                {"type": "image_url", "image_url": f"data:image/png;base64,{img_base64}"}
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
             ]}
         ],
         max_tokens=150
