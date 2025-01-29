@@ -22,9 +22,13 @@ st.title("SEO Image Alt Tag Generator")
 uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file:
-    # Load the image
-    image = Image.open(uploaded_file).convert('RGB')
-    st.image(image, caption="Uploaded Image", use_container_width=True)
+    # Check file size
+    max_size_mb = 5  # Set limit (5MB)
+    if uploaded_file.size > max_size_mb * 1024 * 1024:
+        st.error("File too large! Please upload an image smaller than 5MB.")
+    else:
+        image = Image.open(uploaded_file).convert('RGB')
+        st.image(image, caption="Uploaded Image", use_container_width=True)
 
     # Generate basic caption
     with st.spinner("Generating caption..."):
