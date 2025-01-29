@@ -14,7 +14,6 @@ if not api_key or not api_key.startswith("sk-"):
 # Initialize OpenAI client with correct API key
 openai_client = openai.OpenAI(api_key=api_key)
 
-
 # Function to encode image as base64
 def encode_image_to_base64(image):
     """Convert image to base64 string."""
@@ -26,8 +25,6 @@ def encode_image_to_base64(image):
 # Function to get image caption using GPT-4 Turbo Vision
 def generate_caption_with_gpt4(image):
     """Send image to GPT-4 Turbo Vision and get a description."""
-    
-    # Convert image to base64
     img_base64 = encode_image_to_base64(image)
 
     response = openai_client.chat.completions.create(
@@ -83,43 +80,65 @@ def export_image(image, alt_tag):
     return img_bytes, filename
 
 # Streamlit UI
-st.title("🖼️ SEO Image Alt Tag Generator (Internal Tool - Modern Practice)")
-st.write("Upload an image to generate an alt tag optimized for SEO!")
+st.title("🖼️ SEO Image Alt Tag Generator (Supports Single & Multiple Images)")
+st.write("Upload images to generate AI-powered alt tags optimized for SEO!")
 
-uploaded_file = st.file_uploader("📤 Upload an image", type=["jpg", "jpeg", "png"])
+# User selects if they want to upload a single or multiple images
+upload_mode = st.radio("Choose Upload Mode:", ["Single Image", "Multiple Images"])
 
-if uploaded_file:
-    image = Image.open(uploaded_file).convert('RGB')
-    st.image(image, caption="Uploaded Image", use_container_width=True)
+# Allow single or multiple image uploads based on user choice
+uploaded_files = st.file_uploader("📤 Upload images", type=["jpg", "jpeg", "png"], accept_multiple_files=(upload_mode == "Multiple Images"))
 
-    # Only generate the caption ONCE and store it in session state
-    if "basic_caption" not in st.session_state:
-        with st.spinner("🔍 Generating alt tag with GPT-4 Turbo..."):
-            st.session_state.basic_caption = generate_caption_with_gpt4(image)
+if uploaded_files:
+    if upload_mode == "Single Image":
+        uploaded_files = [uploaded_files]  # Convert to list for consistency
+
+    # Store captions to prevent unnecessary re-processing
+    if "image_captions" not in st.session_state:
+        st.session_state.image_captions = {}
+
+    # Process each image
+    for uploaded_file in uploaded_files:
+        image = Image.open(uploaded_file).convert('RGB')
+
+        # Generate and store caption only if not already generated
+        if uploaded_file.name not in st.session_state.image_captions:
+            with st.spinner(f"🔍 Generating caption for {uploaded_file.name}..."):
+                st.session_state.image_captions[uploaded_file.name] = generate_caption_with_gpt4(image)
+
+        # Display images - Small size for multiple images
+        if upload_mode == "Multiple Images":
+            st.image(image, caption=uploaded_file.name, use_column_width=False, width=150)
+        else:
+            st.image(image, caption="Uploaded Image", use_container_width=True)
 
     # User input for SEO optimization
     keywords = st.text_input("🔑 Enter target keywords (comma-separated)").split(",")
-    theme = st.text_input("🎨 Enter the theme of the photo")
+    theme = st.text_input("🎨 Enter the theme of the photos")
 
-    if st.button("🚀 Generate Optimized Alt Tag"):
+    if st.button("🚀 Generate Optimized Alt Tags"):
         if not keywords or not theme:
             st.warning("⚠️ Please enter both keywords and theme.")
         else:
-            with st.spinner("✨ Optimizing Alt Tag..."):
-                optimized_alt_tag = optimize_alt_tag_gpt4(st.session_state.basic_caption, keywords, theme)
-            
-            # Get length of alt tag
-            alt_tag_length = len(optimized_alt_tag)
+            for uploaded_file in uploaded_files:
+                image = Image.open(uploaded_file).convert('RGB')
+                basic_caption = st.session_state.image_captions[uploaded_file.name]
 
-            st.success("✅ Optimized Alt Tag Generated:")
-            st.write(optimized_alt_tag)
-            st.write(f"📝 **Alt Tag Length:** {alt_tag_length} characters")
+                with st.spinner(f"✨ Optimizing Alt Tag for {uploaded_file.name}..."):
+                    optimized_alt_tag = optimize_alt_tag_gpt4(basic_caption, keywords, theme)
 
-            # Export image with new filename
-            img_bytes, filename = export_image(image, optimized_alt_tag)
-            st.download_button(
-                label="📥 Download Image with New Alt Tag",
-                data=img_bytes,
-                file_name=filename,
-                mime="image/png"
-            )
+                # Get length of alt tag
+                alt_tag_length = len(optimized_alt_tag)
+
+                st.success(f"✅ Optimized Alt Tag for **{uploaded_file.name}**:")
+                st.write(optimized_alt_tag)
+                st.write(f"📝 **Alt Tag Length:** {alt_tag_length} characters")
+
+                # Export image with new filename
+                img_bytes, filename = export_image(image, optimized_alt_tag)
+                st.download_button(
+                    label=f"📥 Download {uploaded_file.name} with New Alt Tag",
+                    data=img_bytes,
+                    file_name=filename,
+                    mime="image/png"
+                )
