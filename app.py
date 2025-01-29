@@ -4,15 +4,14 @@ from PIL import Image
 import io
 import base64
 
-openai_client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-
 # Load OpenAI API key securely from Streamlit secrets
 api_key = st.secrets.get("OPENAI_API_KEY")
 
-if not api_key or api_key == "your-api-key":
+if not api_key or not api_key.startswith("sk-"):
     st.error("🔑 OpenAI API Key is missing or incorrect! Please update it in Streamlit Secrets.")
     st.stop()
 
+# Initialize OpenAI client with correct API key
 openai_client = openai.OpenAI(api_key=api_key)
 
 
