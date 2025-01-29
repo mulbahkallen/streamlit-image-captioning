@@ -14,7 +14,7 @@ model = VisionEncoderDecoderModel.from_pretrained(model_name)
 feature_extractor = ViTFeatureExtractor.from_pretrained(model_name)
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")  # Force CPU usage
 model.to(device)
 
 st.title("SEO Image Alt Tag Generator")
