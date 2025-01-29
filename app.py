@@ -4,17 +4,12 @@ from PIL import Image
 import io
 import base64
 
-openai_client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-
-
-# Load OpenAI API key securely from Streamlit secrets 
-api_key = st.secrets.get("OPENAI_API_KEY")
-
-if not api_key or api_key == "your-api-key":
-    st.error("🔑 OpenAI API Key is missing or incorrect! Please update it in Streamlit Secrets.")
+# Load OpenAI API key securely from Streamlit secrets
+try:
+    openai_client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+except KeyError:
+    st.error("🔑 OpenAI API Key is missing! Please add it in Streamlit Secrets.")
     st.stop()
-
-openai_client = openai.OpenAI(api_key=api_key)
 
 # Function to encode image as base64
 def encode_image_to_base64(image):
