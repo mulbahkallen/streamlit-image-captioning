@@ -84,6 +84,8 @@ def export_image(image, alt_tag):
 # Streamlit UI
 st.title("🖼️ SEO Image Alt Tag Generator (Supports Single & Multiple Images)")
 st.write("Upload images to generate AI-powered alt tags optimized for SEO!")
+st.write("Modern Practice Internal Tool Only")
+
 
 # User selects if they want to upload a single or multiple images
 upload_mode = st.radio("Choose Upload Mode:", ["Single Image", "Multiple Images"])
