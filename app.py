@@ -5,8 +5,6 @@ import io
 import base64
 import zipfile
 import os
-import tkinter as tk
-from tkinter import filedialog
 
 # Load OpenAI API key securely from Streamlit secrets
 api_key = st.secrets.get("OPENAI_API_KEY")
@@ -70,35 +68,29 @@ def optimize_alt_tag_gpt4(caption, keywords, theme):
 
     return response.choices[0].message.content.strip()
 
-# Function to open a folder selection dialog
-def select_folder():
-    """Opens a system dialog for selecting a folder."""
-    root = tk.Tk()
-    root.withdraw()  # Hide the root window
-    folder_path = filedialog.askdirectory(title="Select Destination Folder")
-    return folder_path
+# Function to export image with new alt tag as filename
+def export_image(image, alt_tag):
+    """Save the image with the optimized alt tag as the filename."""
+    alt_tag_cleaned = alt_tag.replace(" ", "_").replace(",", "").replace(".", "").replace("/", "").replace("\\", "")
+    filename = f"{alt_tag_cleaned}.png"
+    
+    # Save image to a BytesIO object for download
+    img_bytes = io.BytesIO()
+    image.save(img_bytes, format="PNG")
+    img_bytes.seek(0)
+    
+    return img_bytes, filename
 
 # Streamlit UI
 st.title("🖼️ SEO Image Alt Tag Generator (Supports Single & Multiple Images)")
 st.write("Upload images to generate AI-powered alt tags optimized for SEO!")
 st.write("Modern Practice Internal Tool")
 
-
 # User selects if they want to upload a single or multiple images
 upload_mode = st.radio("Choose Upload Mode:", ["Single Image", "Multiple Images"])
 
 # Allow single or multiple image uploads based on user choice
 uploaded_files = st.file_uploader("📤 Upload images", type=["jpg", "jpeg", "png"], accept_multiple_files=(upload_mode == "Multiple Images"))
-
-# Folder selection button
-if st.button("📂 Select Destination Folder"):
-    selected_folder = select_folder()
-    if selected_folder:
-        st.session_state["destination_folder"] = selected_folder
-
-# Display selected folder
-if "destination_folder" in st.session_state:
-    st.success(f"📁 Selected Destination Folder: {st.session_state['destination_folder']}")
 
 if uploaded_files:
     if upload_mode == "Single Image":
@@ -159,7 +151,7 @@ if uploaded_files:
     # Provide bulk download for multiple images
     zip_buffer.seek(0)
     st.download_button(
-        label="📥 Download All Images",
+        label="📥 Download All Images as ZIP",
         data=zip_buffer,
         file_name="optimized_images.zip",
         mime="application/zip"
