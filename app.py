@@ -104,27 +104,26 @@ if uploaded_files:
     
     # Store optimized images for bulk download
     zip_buffer = io.BytesIO()
-    
-    with zipfile.ZipFile(zip_buffer, "w") as zipf:
-        for idx, uploaded_file in enumerate(uploaded_files):
-            image = Image.open(uploaded_file).convert('RGB')
+    zipf = zipfile.ZipFile(zip_buffer, "w")  # ✅ Move ZIP creation outside the loop
 
-            # Generate and store caption only if not already generated
-            if uploaded_file.name not in st.session_state.image_captions:
-                with st.spinner(f"🔍 Generating caption for {uploaded_file.name}..."):
-                    st.session_state.image_captions[uploaded_file.name] = generate_caption_with_gpt4(image)
+    for idx, uploaded_file in enumerate(uploaded_files):
+        image = Image.open(uploaded_file).convert('RGB')
 
-            # Display images in a row
-            if idx % 3 == 0:
-                col = col1
-            elif idx % 3 == 1:
-                col = col2
-            else:
-                col = col3
+        # Generate and store caption only if not already generated
+        if uploaded_file.name not in st.session_state.image_captions:
+            with st.spinner(f"🔍 Generating caption for {uploaded_file.name}..."):
+                st.session_state.image_captions[uploaded_file.name] = generate_caption_with_gpt4(image)
 
-            col.image(image, caption=uploaded_file.name, use_container_width=False, width=150)
+        # Display images in a row
+        if idx % 3 == 0:
+            col = col1
+        elif idx % 3 == 1:
+            col = col2
+        else:
+            col = col3
 
-            # User input for SEO optimization
+        col.image(image, caption=uploaded_file.name, use_container_width=False, width=150)
+
     keywords = st.text_input("🔑 Enter target keywords (comma-separated)").split(",")
     theme = st.text_input("🎨 Enter the theme of the photos")
 
@@ -149,11 +148,13 @@ if uploaded_files:
                 # Export image with new filename
                 img_bytes, filename = export_image(image, optimized_alt_tag)
                 
-                # Save to ZIP for bulk download
+                # ✅ Write to ZIP while it's still open
                 zipf.writestr(filename, img_bytes.getvalue())
 
-    # Provide bulk download for multiple images
+    zipf.close()  # ✅ Close the ZIP file **after all images are added**
     zip_buffer.seek(0)
+
+    # Provide bulk download for multiple images
     st.download_button(
         label="📥 Download All Images",
         data=zip_buffer,
