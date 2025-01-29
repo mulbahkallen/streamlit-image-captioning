@@ -3,6 +3,8 @@ import openai
 from PIL import Image
 import io
 import base64
+import zipfile
+import os
 
 # Load OpenAI API key securely from Streamlit secrets
 api_key = st.secrets.get("OPENAI_API_KEY")
@@ -81,13 +83,16 @@ def export_image(image, alt_tag):
 
 # Streamlit UI
 st.title("🖼️ SEO Image Alt Tag Generator (Supports Single & Multiple Images)")
-st.write("Upload images to generate AI-powered alt tags optimized for SEO!")
+st.write(" Modern Practice Tool to upload images and generate alt tags optimized for SEO")
 
 # User selects if they want to upload a single or multiple images
 upload_mode = st.radio("Choose Upload Mode:", ["Single Image", "Multiple Images"])
 
 # Allow single or multiple image uploads based on user choice
 uploaded_files = st.file_uploader("📤 Upload images", type=["jpg", "jpeg", "png"], accept_multiple_files=(upload_mode == "Multiple Images"))
+
+# Destination folder selection
+destination_folder = st.text_input("📁 Enter destination folder for downloaded images (optional):")
 
 if uploaded_files:
     if upload_mode == "Single Image":
@@ -97,22 +102,32 @@ if uploaded_files:
     if "image_captions" not in st.session_state:
         st.session_state.image_captions = {}
 
-    # Process each image
-    for uploaded_file in uploaded_files:
-        image = Image.open(uploaded_file).convert('RGB')
+    # Layout images in a row for multiple image uploads
+    col1, col2, col3 = st.columns(3)
+    
+    # Store optimized images for bulk download
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, "w") as zipf:
+        for idx, uploaded_file in enumerate(uploaded_files):
+            image = Image.open(uploaded_file).convert('RGB')
 
-        # Generate and store caption only if not already generated
-        if uploaded_file.name not in st.session_state.image_captions:
-            with st.spinner(f"🔍 Generating caption for {uploaded_file.name}..."):
-                st.session_state.image_captions[uploaded_file.name] = generate_caption_with_gpt4(image)
+            # Generate and store caption only if not already generated
+            if uploaded_file.name not in st.session_state.image_captions:
+                with st.spinner(f"🔍 Generating caption for {uploaded_file.name}..."):
+                    st.session_state.image_captions[uploaded_file.name] = generate_caption_with_gpt4(image)
 
-        # Display images - Small size for multiple images
-            if upload_mode == "Multiple Images":
-                st.image(image, caption=uploaded_file.name, use_container_width=False, width=150)
+            # Display images in a row
+            if idx % 3 == 0:
+                col = col1
+            elif idx % 3 == 1:
+                col = col2
             else:
-                st.image(image, caption="Uploaded Image", use_container_width=True)
+                col = col3
 
-    # User input for SEO optimization
+            col.image(image, caption=uploaded_file.name, use_container_width=False, width=150)
+
+            # User input for SEO optimization
     keywords = st.text_input("🔑 Enter target keywords (comma-separated)").split(",")
     theme = st.text_input("🎨 Enter the theme of the photos")
 
@@ -136,9 +151,15 @@ if uploaded_files:
 
                 # Export image with new filename
                 img_bytes, filename = export_image(image, optimized_alt_tag)
-                st.download_button(
-                    label=f"📥 Download {uploaded_file.name} with New Alt Tag",
-                    data=img_bytes,
-                    file_name=filename,
-                    mime="image/png"
-                )
+                
+                # Save to ZIP for bulk download
+                zipf.writestr(filename, img_bytes.getvalue())
+
+    # Provide bulk download for multiple images
+    zip_buffer.seek(0)
+    st.download_button(
+        label="📥 Download All Images",
+        data=zip_buffer,
+        file_name="optimized_images.zip",
+        mime="application/zip"
+    )
