@@ -82,7 +82,7 @@ def export_image(image, alt_tag):
     return img_bytes, filename
 
 # Streamlit UI
-st.title("🖼️ SEO Image Alt Tag Generator")
+st.title("🖼️ SEO Image alt Tag Generator")
 st.write("Upload images to generate alt tags optimized for SEO!")
 st.write("Modern Practice Internal Tool Only")
 
