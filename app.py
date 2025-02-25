@@ -5,6 +5,7 @@ import io
 import base64
 import zipfile
 import os
+import csv
 
 # Load OpenAI API key securely from Streamlit secrets
 api_key = st.secrets.get("OPENAI_API_KEY")
@@ -51,12 +52,12 @@ def optimize_alt_tag_gpt4(caption, keywords, theme):
         f"The target keywords are: {', '.join(keywords)}.\n"
         f"The theme of the photos is: {theme}.\n"
         f"Please generate an optimized alt text following these SEO best practices:\n"
-        f"1️⃣ **Keep it concise**: Alt text should be under 100 characters.\n"
-        f"2️⃣ **Provide context**: Describe what the image means in the site's content.\n"
-        f"3️⃣ **Include relevant keywords** naturally, without stuffing.\n"
-        f"4️⃣ **Avoid unnecessary phrases** like 'image of' or 'picture of'.\n"
-        f"5️⃣ **Improve accessibility**: Ensure clarity for visually impaired users.\n"
-        f"Generate an optimized alt tag based on these guidelines."
+        f"1️⃣ Keep it concise (under 100 characters).\n"
+        f"2️⃣ Provide context relevant to the site's content.\n"
+        f"3️⃣ Naturally include keywords without keyword stuffing.\n"
+        f"4️⃣ Avoid 'image of', 'picture of', or similar redundant phrases.\n"
+        f"5️⃣ Provide clarity for visually impaired users.\n"
+        f"Generate a final optimized alt tag now."
     )
 
     response = openai_client.chat.completions.create(
@@ -68,13 +69,29 @@ def optimize_alt_tag_gpt4(caption, keywords, theme):
 
     return response.choices[0].message.content.strip()
 
+# Function to possibly resize the image before export
+def resize_image(image, max_width):
+    """Optionally resize the image if its width is larger than max_width, preserving aspect ratio."""
+    if image.width > max_width:
+        # Calculate new height maintaining aspect ratio
+        ratio = max_width / float(image.width)
+        new_height = int(ratio * float(image.height))
+        image = image.resize((max_width, new_height), Image.ANTIALIAS)
+    return image
+
 # Function to export image with new alt tag as filename
 def export_image(image, alt_tag):
-    """Save the image with the optimized alt tag as the filename."""
-    alt_tag_cleaned = alt_tag.replace(" ", "_").replace(",", "").replace(".", "").replace("/", "").replace("\\", "")
+    """Save the image with the optimized alt tag as the filename (cleaned up)."""
+    alt_tag_cleaned = (
+        alt_tag.replace(" ", "_")
+               .replace(",", "")
+               .replace(".", "")
+               .replace("/", "")
+               .replace("\\", "")
+    )
     filename = f"{alt_tag_cleaned}.png"
     
-    # Save image to a BytesIO object for download
+    # Save image to a BytesIO object
     img_bytes = io.BytesIO()
     image.save(img_bytes, format="PNG")
     img_bytes.seek(0)
@@ -82,41 +99,106 @@ def export_image(image, alt_tag):
     return img_bytes, filename
 
 # Streamlit UI
-st.title("🖼️ SEO Image alt Tag Generator")
-st.write("Upload images to generate alt tags optimized for SEO!")
-st.write("Modern Practice Internal Tool Only")
+st.title("🖼️ SEO Image Alt Tag Generator")
+st.markdown("""
+**Welcome!**  
+This tool uses GPT-4 to:
+1. Generate a descriptive caption for each image.  
+2. Create an SEO-optimized alt tag.  
+3. Allow you to download images renamed by their alt tags in a ZIP.  
+4. Optionally export a CSV with all metadata.  
 
+*For best results, provide relevant **keywords** and a clear **theme**.*
+""")
 
-# User selects if they want to upload a single or multiple images
-upload_mode = st.radio("Choose Upload Mode:", ["Single Image", "Multiple Images"])
+# --- Advanced Settings (Collapsible) ---
+with st.expander("⚙️ Advanced Settings"):
+    st.markdown("Here you can **optionally** resize images before exporting to unify their width.")
+    resize_option = st.checkbox("Resize images before export?")
+    if resize_option:
+        max_width_setting = st.slider("Max Width (px):", min_value=100, max_value=2000, value=800, step=50)
+    else:
+        max_width_setting = None
 
-# Allow single or multiple image uploads based on user choice
-uploaded_files = st.file_uploader("📤 Upload images", type=["jpg", "jpeg", "png"], accept_multiple_files=(upload_mode == "Multiple Images"))
+# Ask user if they want to upload a single/multiple images or specify a local folder
+mode = st.radio("How do you want to select images?", ["Single Image", "Multiple Images", "Folder Input"])
+
+folder_images = []
+
+if mode == "Folder Input":
+    st.info("Enter the folder path on this machine. All .jpg, .jpeg, and .png files will be processed.")
+    folder_path = st.text_input("Folder Path", value="")
+    if folder_path:
+        # Validate if path exists
+        if os.path.isdir(folder_path):
+            all_files = os.listdir(folder_path)
+            # Filter for image files
+            image_paths = [
+                os.path.join(folder_path, f) for f in all_files
+                if f.lower().endswith((".jpg", ".jpeg", ".png"))
+            ]
+            # Load them as "file-like" objects in memory
+            for path in image_paths:
+                try:
+                    with open(path, "rb") as f:
+                        file_bytes = f.read()
+                        folder_images.append((os.path.basename(path), file_bytes))
+                except Exception as e:
+                    st.warning(f"Could not read file {path}: {e}")
+        else:
+            st.error("Invalid folder path! Please check the path and try again.")
+
+# For single or multiple file uploads (via Streamlit interface)
+if mode in ["Single Image", "Multiple Images"]:
+    multiple = (mode == "Multiple Images")
+    uploaded_files = st.file_uploader(
+        "Upload Image(s)",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=multiple
+    )
+else:
+    # For folder input mode, treat images as if "uploaded" (in memory).
+    uploaded_files = None
+
+# Convert single upload to list if needed
+if uploaded_files and mode == "Single Image":
+    uploaded_files = [uploaded_files]
+
+# Combine the folder-based images with the uploaded images
+# We'll unify them into a list of (name, file_bytes) pairs
+all_input_images = []
 
 if uploaded_files:
-    if upload_mode == "Single Image":
-        uploaded_files = [uploaded_files]  # Convert to list for consistency
+    for uf in uploaded_files:
+        all_input_images.append((uf.name, uf.read()))
 
-    # Store captions to prevent unnecessary re-processing
+if folder_images:
+    all_input_images.extend(folder_images)
+
+if len(all_input_images) > 0:
+    st.success(f"**Total Images Found:** {len(all_input_images)}")
+
+    # Collect or initialize session state for captions
     if "image_captions" not in st.session_state:
         st.session_state.image_captions = {}
 
-    # Layout images in a row for multiple image uploads
+    # Display images in columns
     col1, col2, col3 = st.columns(3)
-    
-    # Store optimized images for bulk download
     zip_buffer = io.BytesIO()
-    zipf = zipfile.ZipFile(zip_buffer, "w")  # ✅ Move ZIP creation outside the loop
+    zipf = zipfile.ZipFile(zip_buffer, "w")
 
-    for idx, uploaded_file in enumerate(uploaded_files):
-        image = Image.open(uploaded_file).convert('RGB')
+    # We also want to store data for CSV export
+    csv_data = [("Original Filename", "Basic GPT-4 Caption", "Optimized Alt Text", "Alt Text Length", "Exported Filename")]
 
-        # Generate and store caption only if not already generated
-        if uploaded_file.name not in st.session_state.image_captions:
-            with st.spinner(f"🔍 Generating caption for {uploaded_file.name}..."):
-                st.session_state.image_captions[uploaded_file.name] = generate_caption_with_gpt4(image)
+    for idx, (img_name, img_bytes_data) in enumerate(all_input_images):
+        image = Image.open(io.BytesIO(img_bytes_data)).convert("RGB")
 
-        # Display images in a row
+        # Generate caption if not already stored
+        if img_name not in st.session_state.image_captions:
+            with st.spinner(f"Generating GPT-4 caption for: {img_name}"):
+                st.session_state.image_captions[img_name] = generate_caption_with_gpt4(image)
+
+        # Display the image in one of three columns
         if idx % 3 == 0:
             col = col1
         elif idx % 3 == 1:
@@ -124,42 +206,71 @@ if uploaded_files:
         else:
             col = col3
 
-        col.image(image, caption=uploaded_file.name, use_container_width=False, width=150)
+        col.image(image, caption=img_name, width=150)
 
-    keywords = st.text_input("🔑 Enter target keywords (comma-separated)").split(",")
-    theme = st.text_input("🎨 Enter the theme of the photos")
+    st.markdown("---")
+    st.markdown("### Provide Keywords & Theme")
+    st.markdown("These help GPT-4 optimize the alt text for SEO.")
+    keywords_input = st.text_input("🔑 Enter target keywords (comma-separated):", "")
+    theme_input = st.text_input("🎨 Enter the theme of the photos:")
 
-    if st.button("🚀 Generate Optimized Alt Tags"):
-        if not keywords or not theme:
-            st.warning("⚠️ Please enter both keywords and theme.")
-        else:
-            for uploaded_file in uploaded_files:
-                image = Image.open(uploaded_file).convert('RGB')
-                basic_caption = st.session_state.image_captions[uploaded_file.name]
+    if st.button("🚀 Generate and Download"):
+        if not keywords_input.strip() or not theme_input.strip():
+            st.warning("Please provide both keywords and theme to proceed.")
+            st.stop()
 
-                with st.spinner(f"✨ Optimizing Alt Tag for {uploaded_file.name}..."):
-                    optimized_alt_tag = optimize_alt_tag_gpt4(basic_caption, keywords, theme)
+        keywords = [k.strip() for k in keywords_input.split(",") if k.strip()]
+        theme = theme_input.strip()
 
-                # Get length of alt tag
-                alt_tag_length = len(optimized_alt_tag)
+        for img_name, img_bytes_data in all_input_images:
+            image = Image.open(io.BytesIO(img_bytes_data)).convert("RGB")
+            basic_caption = st.session_state.image_captions.get(img_name, "")
 
-                st.success(f"✅ Optimized Alt Tag for **{uploaded_file.name}**:")
-                st.write(optimized_alt_tag)
-                st.write(f"📝 **Alt Tag Length:** {alt_tag_length} characters")
+            with st.spinner(f"Optimizing Alt Tag for {img_name}..."):
+                optimized_alt_tag = optimize_alt_tag_gpt4(basic_caption, keywords, theme)
 
-                # Export image with new filename
-                img_bytes, filename = export_image(image, optimized_alt_tag)
-                
-                # ✅ Write to ZIP while it's still open
-                zipf.writestr(filename, img_bytes.getvalue())
+            alt_tag_length = len(optimized_alt_tag)
 
-    zipf.close()  # ✅ Close the ZIP file **after all images are added**
-    zip_buffer.seek(0)
+            # Optionally resize if user chose to do so
+            if resize_option and max_width_setting:
+                image = resize_image(image, max_width_setting)
 
-    # Provide bulk download for multiple images
-    st.download_button(
-        label="📥 Download All Images",
-        data=zip_buffer,
-        file_name="optimized_images.zip",
-        mime="application/zip"
-    )
+            # Export image to memory
+            img_bytes, exported_filename = export_image(image, optimized_alt_tag)
+
+            # Write to ZIP
+            zipf.writestr(exported_filename, img_bytes.getvalue())
+
+            # Collect data for CSV
+            csv_data.append((img_name, basic_caption, optimized_alt_tag, str(alt_tag_length), exported_filename))
+
+        # Close ZIP
+        zipf.close()
+        zip_buffer.seek(0)
+
+        st.markdown("---")
+        st.success("All images have been processed and zipped!")
+        st.download_button(
+            label="📥 Download ZIP of Optimized Images",
+            data=zip_buffer,
+            file_name="optimized_images.zip",
+            mime="application/zip"
+        )
+
+        # Create a CSV in memory
+        csv_bytes = io.BytesIO()
+        writer = csv.writer(csv_bytes)
+        for row in csv_data:
+            writer.writerow(row)
+        csv_bytes.seek(0)
+
+        st.download_button(
+            label="📄 Download CSV Metadata",
+            data=csv_bytes.getvalue(),
+            file_name="image_metadata.csv",
+            mime="text/csv"
+        )
+
+        # Display final results in a table
+        st.markdown("### Summary Table")
+        st.table(csv_data)  # quick way to show final data
