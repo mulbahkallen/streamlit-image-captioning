@@ -6,6 +6,7 @@ import base64
 import zipfile
 import os
 import csv
+import pandas as pd
 
 # ==============================
 #  Load OpenAI API Key
@@ -48,11 +49,12 @@ def generate_caption_with_gpt4(image_bytes):
         model="gpt-4-turbo",
         messages=[
             {"role": "system", "content": "You are an AI image captioning assistant."},
-            {"role": "user", 
-             "content": [
-                {"type": "text", "text": "Describe this image in detail:"},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
-             ]
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe this image in detail:"},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
+                ]
             }
         ],
         max_tokens=150
@@ -134,8 +136,8 @@ st.markdown("""
 1. Drag-and-drop individual images or multiple images.  
 2. Alternatively, upload a **.zip folder** of images (drag-and-drop) if you have a folder of images.  
 3. Provide your **keywords**, **theme**, and now **location** for local SEO.  
-4. Generate a GPT-4 caption and SEO-optimized alt tags.  
-5. Download a ZIP with renamed images **and** a CSV metadata file.
+4. Generate a GPT-4 caption (internally) and SEO-optimized alt tags.  
+5. Download a ZIP with renamed images **and** a CSV metadata file (no GPT-4 caption displayed).
 """)
 
 # --- Advanced Settings (Collapsible) ---
@@ -196,7 +198,6 @@ if all_input_images:
     st.success(f"**Total Images Found**: {len(all_input_images)}")
 
     # Collect or initialize session state for GPT-4 captions
-    # We'll use a dict keyed by (filename, possibly hashed bytes) for uniqueness
     if "image_captions" not in st.session_state:
         st.session_state.image_captions = {}
 
@@ -224,7 +225,7 @@ if all_input_images:
     location_input = st.text_input("📍 Enter location (for local SEO):", "")
 
     if st.button("🚀 Generate & Download Alt-Optimized Images"):
-        if (not keywords_input.strip()) or (not theme_input.strip()) or (not location_input.strip()):
+        if not keywords_input.strip() or not theme_input.strip() or not location_input.strip():
             st.warning("Please provide keywords, theme, and location to proceed.")
             st.stop()
 
@@ -236,20 +237,19 @@ if all_input_images:
         zip_buffer = io.BytesIO()
         zipf = zipfile.ZipFile(zip_buffer, "w")
 
-        # Prepare CSV data
+        # Prepare CSV data (NO GPT-4 caption displayed)
         csv_data = [
-            ("Original Filename", 
-             "GPT-4 Caption", 
-             "Optimized Alt Text", 
-             "Alt Text Length", 
+            ("Original Filename",
+             "Optimized Alt Text",
+             "Alt Text Length",
              "Exported Filename")
         ]
 
         # Go through each image
         for img_name, img_bytes_data in all_input_images:
-            # 1. Generate GPT-4 basic caption (cached)
-            if (img_name not in st.session_state.image_captions):
-                with st.spinner(f"Generating caption for {img_name}..."):
+            # 1. Generate GPT-4 basic caption (cached) for alt text optimization
+            if img_name not in st.session_state.image_captions:
+                with st.spinner(f"Generating GPT-4 caption for {img_name}..."):
                     st.session_state.image_captions[img_name] = generate_caption_with_gpt4(img_bytes_data)
 
             basic_caption = st.session_state.image_captions[img_name]
@@ -267,39 +267,45 @@ if all_input_images:
             img_bytes, exported_filename = export_image(image, optimized_alt_tag, output_format)
             zipf.writestr(exported_filename, img_bytes.getvalue())
 
-            # 5. Collect for CSV
+            # 5. Collect row data for CSV (No GPT-4 caption displayed)
             alt_tag_length = len(optimized_alt_tag)
-            csv_data.append((img_name, basic_caption, optimized_alt_tag, str(alt_tag_length), exported_filename))
+            csv_data.append((img_name, optimized_alt_tag, str(alt_tag_length), exported_filename))
 
         # Close ZIP
         zipf.close()
         zip_buffer.seek(0)
-        
+
         st.markdown("---")
         st.success("All images have been processed and zipped!")
+
+        # ---- Download ZIP
         st.download_button(
             label="📥 Download ZIP of Optimized Images",
             data=zip_buffer,
             file_name="optimized_images.zip",
             mime="application/zip"
         )
-        
+
         # CREATE CSV in-memory (StringIO for text-based)
         csv_buffer = io.StringIO()
         writer = csv.writer(csv_buffer)
-        
         for row in csv_data:
             writer.writerow(row)
-        
-        # Now encode the string data
+
+        # Convert CSV content to bytes
         csv_bytes = csv_buffer.getvalue().encode("utf-8")
-        
+
+        # ---- Download CSV
         st.download_button(
             label="📄 Download CSV Metadata",
             data=csv_bytes,
             file_name="image_metadata.csv",
             mime="text/csv"
         )
-        
+
+        # ---- Display Summary Table (without GPT-4 caption)
         st.markdown("### Summary Table")
-        st.table(csv_data)
+        headers = csv_data[0]
+        rows = csv_data[1:]  # all data except header
+        df = pd.DataFrame(rows, columns=headers)
+        st.dataframe(df, use_container_width=True)
