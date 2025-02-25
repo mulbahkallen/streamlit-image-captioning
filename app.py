@@ -274,8 +274,7 @@ if all_input_images:
         # Close ZIP
         zipf.close()
         zip_buffer.seek(0)
-
-        # --- Download Buttons ---
+        
         st.markdown("---")
         st.success("All images have been processed and zipped!")
         st.download_button(
@@ -284,20 +283,23 @@ if all_input_images:
             file_name="optimized_images.zip",
             mime="application/zip"
         )
-
-        # Create CSV in-memory
-        csv_bytes = io.BytesIO()
-        writer = csv.writer(csv_bytes)
+        
+        # CREATE CSV in-memory (StringIO for text-based)
+        csv_buffer = io.StringIO()
+        writer = csv.writer(csv_buffer)
+        
         for row in csv_data:
             writer.writerow(row)
-        csv_bytes.seek(0)
-
+        
+        # Now encode the string data
+        csv_bytes = csv_buffer.getvalue().encode("utf-8")
+        
         st.download_button(
             label="📄 Download CSV Metadata",
-            data=csv_bytes.getvalue(),
+            data=csv_bytes,
             file_name="image_metadata.csv",
             mime="text/csv"
         )
-
+        
         st.markdown("### Summary Table")
         st.table(csv_data)
