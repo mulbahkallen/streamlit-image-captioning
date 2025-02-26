@@ -158,7 +158,7 @@ st.markdown("""
 2. Alternatively, upload a **.zip folder** of images (drag-and-drop) if you have a folder of images.  
 3. Provide your **keywords**, **theme**, and now **location** for local SEO.  
 4. Generate a GPT-4 caption (internally) and SEO-optimized alt tags.  
-5. Download a ZIP with renamed images **and** a CSV metadata file (no GPT-4 caption displayed).
+5. Download a ZIP with renamed images **and** a CSV metadata file.
 """)
 
 # --- Advanced Settings (Collapsible) ---
