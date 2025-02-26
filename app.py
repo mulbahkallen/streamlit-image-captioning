@@ -29,56 +29,59 @@ openai.api_key = api_key
 def encode_image_to_base64(image):
     """
     Convert PIL image to base64 string.
-    Caching helps avoid re-encoding the same image on repeated runs.
+    (We won't be using this for GPT-4 anymore,
+    but we keep it in case you need it elsewhere.)
     """
     img_bytes = io.BytesIO()
-    image.save(img_bytes, format="PNG")  # for GPT vision
+    image.save(img_bytes, format="PNG")
     img_base64 = base64.b64encode(img_bytes.getvalue()).decode("utf-8")
     return img_base64
 
 @st.cache_data
 def generate_caption_with_gpt4(image_bytes):
     """
-    Send image bytes to GPT-4 Turbo Vision and get a description.
-    This is cached so repeated runs on the same image won't cost new tokens.
+    A placeholder function that asks GPT-4
+    to provide a *generic* caption, because
+    sending an actual image is NOT supported.
+    Replace this with a local image-captioning
+    model if you need real image-based captions.
     """
-    # Convert the raw bytes into a PIL Image
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    img_base64 = encode_image_to_base64(image)
-
-    # NOTE: GPT-4 image support is hypothetical here. This code
-    # shows the concept of sending an image, though real usage
-    # may differ. GPT-4 with Vision is not publicly available via standard API.
+    # For demonstration, just ask GPT-4
+    # to generate a placeholder caption.
+    prompt = (
+        "You are an AI assistant that generates a short, generic description for an image. "
+        "Since we cannot provide actual image data to GPT-4's public API, please produce a "
+        "brief, natural-sounding caption suitable for most images. For example: "
+        "'A photo highlighting a scenic view.'"
+    )
     response = openai.chat.completions.create(
         model="gpt-4",
         messages=[
-            {"role": "system", "content": "You are an AI image captioning assistant."},
-            {
-                {"role": "system", "content": "You are an AI assistant that refines image captions for SEO."},
-                {"role": "user", "content": f"Here’s a short description of the image: {my_existing_caption}\nPlease optimize it for SEO."}
+            {"role": "user", "content": prompt}
         ],
-        max_tokens=150
+        max_tokens=50
     )
     return response.choices[0].message.content.strip()
 
+@st.cache_data
 def re_run_shortening_gpt4(too_long_text, caption, keywords, theme, location):
     """
     If the alt tag is too long, run GPT-4 again with a stricter prompt:
-    - must be under 100 characters
-    - still retains essential SEO context
+    Must be under 100 characters, but still keep essential SEO context.
     """
     prompt = (
-        f"The following alt text is {len(too_long_text)} characters, but must be under 100 characters.\n"
+        f"The following alt text is {len(too_long_text)} characters, "
+        f"but it must be under 100 characters.\n"
         f"Original alt text: '{too_long_text}'\n"
-        f"Please revise it to be strictly under 100 characters, while retaining the core SEO essence.\n\n"
-        f"Image caption: '{caption}'\n"
+        f"Please revise it to be strictly under 100 characters, while "
+        f"retaining the core SEO essence.\n\n"
+        f"Caption: '{caption}'\n"
         f"Target keywords: {', '.join(keywords)}\n"
         f"Theme: {theme}\n"
         f"Location: {location}\n\n"
-        f"Return ONLY the alt text under 100 characters, with no additional commentary."
+        f"Return ONLY the shortened alt text under 100 characters."
     )
-
-    response = openai.ChatCompletion.create(
+    response = openai.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=100,
@@ -89,15 +92,14 @@ def re_run_shortening_gpt4(too_long_text, caption, keywords, theme, location):
 @st.cache_data
 def optimize_alt_tag_gpt4(caption, keywords, theme, location):
     """
-    Generate an SEO-optimized alt tag using GPT-4 with best practices:
-    1. Keep it concise (under 100 characters).
-    2. Provide context relevant to the site's content.
-    3. Naturally include the keywords and location without stuffing.
-    4. Avoid "image of", "picture of", or similar phrases.
-    5. Provide clarity for visually impaired users.
-    
-    If the returned alt tag is still > 100 characters, automatically
-    re-run GPT-4 with a stricter prompt to get a shortened version.
+    Generate an SEO-optimized alt text using GPT-4 with best practices:
+    1) Keep under 100 characters.
+    2) Provide relevant context.
+    3) Naturally include keywords and location.
+    4) Avoid "image of", "picture of", etc.
+    5) Provide clarity for visually impaired users.
+
+    If the returned alt tag is > 100 characters, re-run GPT-4 with a stricter prompt.
     """
     prompt = (
         f"Image caption: '{caption}'.\n"
@@ -107,13 +109,12 @@ def optimize_alt_tag_gpt4(caption, keywords, theme, location):
         f"Please generate an optimized alt text following these SEO best practices:\n"
         f"1️⃣ Keep it concise (under 100 characters).\n"
         f"2️⃣ Provide context relevant to the site's content.\n"
-        f"3️⃣ Naturally include the keywords and location without stuffing.\n"
-        f"4️⃣ Avoid 'image of', 'picture of', or similar phrases.\n"
+        f"3️⃣ Naturally include the keywords and location.\n"
+        f"4️⃣ Avoid phrases like 'image of', 'picture of'.\n"
         f"5️⃣ Provide clarity for visually impaired users.\n\n"
-        f"Return ONLY the final alt tag, nothing else."
+        f"Return ONLY the final alt text, nothing else."
     )
-
-    response = openai.ChatCompletion.create(
+    response = openai.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=100,
@@ -121,8 +122,8 @@ def optimize_alt_tag_gpt4(caption, keywords, theme, location):
     )
     alt_tag = response.choices[0].message.content.strip()
 
-    # If GPT returns something still > 100 chars, re-run with a stricter prompt
-    for _ in range(3):  # Try up to 3 times if GPT doesn't obey
+    # Re-run up to 3 times if GPT doesn't respect the length
+    for _ in range(3):
         if len(alt_tag) <= 100:
             break
         alt_tag = re_run_shortening_gpt4(alt_tag, caption, keywords, theme, location)
@@ -136,20 +137,16 @@ def resize_image(image, max_width):
     if image.width > max_width:
         ratio = max_width / float(image.width)
         new_height = int(ratio * float(image.height))
+        # ANTIALIAS is deprecated in newer Pillow versions, but still recognized
         image = image.resize((max_width, new_height), Image.ANTIALIAS)
     return image
 
 def export_image(image, alt_tag, user_format_choice):
     """
-    Save the image using the alt_tag for the filename (cleaned).
+    Save the image using the alt_tag for the filename (sanitized).
     Respect the chosen output format (PNG, JPEG, WEBP, AVIF).
-    
-    Removes any stray quotes, ensures it is properly sanitized
-    for file naming. We do not truncate or remove words here;
-    the GPT function is responsible for ensuring the final alt
-    tag (and thus filename) is under 100 characters.
     """
-    # 1. Strip leading/trailing quotes, remove all quotes inside
+    # 1. Sanitize alt_tag for file naming
     alt_tag = alt_tag.strip('"').strip("'")
     alt_tag_cleaned = (
         alt_tag.replace('"', "")
@@ -160,19 +157,18 @@ def export_image(image, alt_tag, user_format_choice):
                .replace("/", "")
                .replace("\\", "")
     )
-
-    # 2. Strip leading non-alphanumeric characters
+    # Remove leading non-alphanumeric
     alt_tag_cleaned = re.sub(r'^[^a-zA-Z0-9]+', '', alt_tag_cleaned)
 
-    # 3. Final check if > 100 (it shouldn't be if GPT obeyed). But just in case:
+    # Just in case it's still > 100 chars
     if len(alt_tag_cleaned) > 100:
         st.warning(
-            f"❌ Generated alt text exceeded 100 characters, after cleaning:\n'{alt_tag_cleaned}'\n"
+            f"❌ Generated alt text exceeded 100 characters after cleaning:\n'{alt_tag_cleaned}'\n"
             "Please regenerate or manually shorten."
         )
         return None, None
 
-    # 4. Determine file extension and format
+    # 2. Map user choice to extension & Pillow format
     format_mapping = {
         "PNG":  ("png",  "PNG"),
         "JPEG": ("jpg",  "JPEG"),
@@ -180,8 +176,9 @@ def export_image(image, alt_tag, user_format_choice):
         "AVIF": ("avif", "AVIF")
     }
     extension, pillow_format = format_mapping[user_format_choice]
-
     filename = f"{alt_tag_cleaned}.{extension}"
+
+    # 3. Save to a BytesIO buffer
     img_bytes = io.BytesIO()
     image.save(img_bytes, format=pillow_format)
     img_bytes.seek(0)
@@ -193,7 +190,6 @@ def export_image(image, alt_tag, user_format_choice):
 # ==============================
 st.title("🖼️ SEO Image Alt Tag Generator")
 
-# Track upload key in session state
 if "upload_key" not in st.session_state:
     st.session_state["upload_key"] = 0
 
@@ -205,10 +201,10 @@ if st.button("Reset App"):
 
 st.markdown("""
 **Welcome!**  
-1. Upload or drag-and-drop individual images or multiple images.  
-2. Alternatively, upload a **.zip folder** of images if you have a folder of images.  
+1. Upload or drag-and-drop images (individual or multiple).  
+2. Alternatively, upload a **.zip folder** of images.  
 3. Provide your **keywords**, **theme**, and **location** for local SEO.  
-4. Generate SEO-optimized alt tags.  
+4. *We generate a placeholder GPT-4 caption (no actual image analysis)* and then an SEO-optimized alt tag.  
 5. Download a ZIP with renamed images **and** a CSV metadata file.
 """)
 
@@ -221,18 +217,11 @@ with st.expander("⚙️ Advanced Settings"):
     else:
         max_width_setting = None
 
-    # Map available formats
-    format_mapping = {
-        "PNG":  ("png",  "PNG"),
-        "JPEG": ("jpg",  "JPEG"),
-        "WEBP": ("webp", "WEBP"),
-        "AVIF": ("avif", "AVIF")
-    }
+    # Let user pick output format
     user_format_choice = st.selectbox(
         "Output Format for Exported Images:",
-        list(format_mapping.keys()),
-        index=0,
-        help="Choose the final file format."
+        ["PNG", "JPEG", "WEBP", "AVIF"],
+        index=0
     )
 
 # Let user choose how to provide images
@@ -243,7 +232,7 @@ upload_mode = st.radio(
 
 all_input_images = []
 
-# Option 1: Upload Images
+# ========== Option 1: Upload Images ==========
 if upload_mode == "Upload Images":
     uploaded_files = st.file_uploader(
         "Drag & drop or select images",
@@ -255,7 +244,7 @@ if upload_mode == "Upload Images":
         for uf in uploaded_files:
             all_input_images.append((uf.name, uf.read()))
 
-# Option 2: Upload a .zip
+# ========== Option 2: Upload a .zip ==========
 elif upload_mode == "Upload a .zip Folder of Images":
     uploaded_zip = st.file_uploader(
         "Drag & drop or select a .zip file of images",
@@ -273,15 +262,15 @@ elif upload_mode == "Upload a .zip Folder of Images":
                         base_name = os.path.basename(file_info.filename)
                         all_input_images.append((base_name, file_bytes))
 
-# If images exist, proceed
+# Process images if any were provided
 if all_input_images:
     st.success(f"**Total Images Found**: {len(all_input_images)}")
 
-    # Initialize image_captions if not present
+    # Initialize session state for image_captions if not present
     if "image_captions" not in st.session_state:
-        st.session_state.image_captions = {}
+        st.session_state["image_captions"] = {}
 
-    # Show images in columns
+    # Display images in columns
     col1, col2, col3 = st.columns(3)
     for idx, (img_name, img_bytes_data) in enumerate(all_input_images):
         image = Image.open(io.BytesIO(img_bytes_data)).convert("RGB")
@@ -295,9 +284,7 @@ if all_input_images:
 
     st.markdown("---")
     st.markdown("### Provide Keywords, Theme & Location")
-    st.markdown(
-        "These help GPT-4 optimize the alt text for SEO, including **local SEO** context."
-    )
+    st.markdown("These will help GPT-4 optimize the alt text for SEO, including local context.")
     
     keywords_input = st.text_input("🔑 Enter target keywords (comma-separated):", "")
     theme_input = st.text_input("🎨 Enter the theme of the photos:", "")
@@ -313,7 +300,7 @@ if all_input_images:
         theme = theme_input.strip()
         location = location_input.strip()
 
-        # Prepare ZIP
+        # Prepare a ZIP
         zip_buffer = io.BytesIO()
         zipf = zipfile.ZipFile(zip_buffer, "w")
 
@@ -323,9 +310,9 @@ if all_input_images:
         ]
 
         for img_name, img_bytes_data in all_input_images:
-            # 1. Generate GPT-4 caption if not cached
+            # 1. Generate a (placeholder) GPT-4 caption, if not cached
             if img_name not in st.session_state.image_captions:
-                with st.spinner(f"Generating GPT-4 caption for {img_name}..."):
+                with st.spinner(f"Generating a placeholder GPT-4 caption for {img_name}..."):
                     st.session_state.image_captions[img_name] = generate_caption_with_gpt4(img_bytes_data)
 
             basic_caption = st.session_state.image_captions[img_name]
@@ -334,15 +321,13 @@ if all_input_images:
             with st.spinner(f"Optimizing Alt Tag for {img_name}..."):
                 optimized_alt_tag = optimize_alt_tag_gpt4(basic_caption, keywords, theme, location)
 
-            # 3. Resize if requested
+            # 3. Resize if needed
             image = Image.open(io.BytesIO(img_bytes_data)).convert("RGB")
             if resize_option and max_width_setting:
                 image = resize_image(image, max_width_setting)
 
-            # 4. Export image
-            img_bytes, exported_filename = export_image(
-                image, optimized_alt_tag, user_format_choice
-            )
+            # 4. Export
+            img_bytes, exported_filename = export_image(image, optimized_alt_tag, user_format_choice)
             if img_bytes is None or exported_filename is None:
                 continue
 
@@ -366,7 +351,7 @@ if all_input_images:
             mime="application/zip"
         )
 
-        # Create CSV in-memory
+        # Create CSV
         csv_buffer = io.StringIO()
         writer = csv.writer(csv_buffer)
         for row in csv_data:
@@ -381,7 +366,7 @@ if all_input_images:
             mime="text/csv"
         )
 
-        # Display Summary Table
+        # Display Summary
         st.markdown("### Summary Table")
         headers = csv_data[0]
         rows = csv_data[1:]
