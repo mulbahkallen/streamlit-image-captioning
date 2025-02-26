@@ -7,6 +7,7 @@ import zipfile
 import os
 import csv
 import pandas as pd
+import re  # <-- NEW for regex
 
 # ==============================
 #  Load OpenAI API Key
@@ -68,7 +69,6 @@ def optimize_alt_tag_gpt4(caption, keywords, theme, location):
     Generate an SEO-optimized alt tag using GPT-4 Turbo with best practices.
     Cached to avoid repeated calls with identical inputs.
     """
-    # Build prompt with location
     prompt = (
         f"Image caption: '{caption}'.\n"
         f"Target keywords: {', '.join(keywords)}.\n"
@@ -108,7 +108,7 @@ def export_image(image, alt_tag, output_format):
     Save the image with the optimized alt tag as the filename.
     Also respect the chosen output format (png/jpg).
     """
-    # Clean alt tag for filename
+
     alt_tag_cleaned = (
         alt_tag.replace(" ", "_")
                .replace(",", "")
@@ -116,11 +116,25 @@ def export_image(image, alt_tag, output_format):
                .replace("/", "")
                .replace("\\", "")
     )
+
+    # ---------- NEW: Strip leading special characters ----------
+    alt_tag_cleaned = re.sub(r'^[^a-zA-Z0-9]+', '', alt_tag_cleaned)
+    # -----------------------------------------------------------
+
+    # ---------- NEW: Enforce 100-character limit ---------------
+    if len(alt_tag_cleaned) > 100:
+        st.warning(
+            f"❌ Cannot save image because filename (derived from alt tag) exceeds "
+            f"100 characters:\n'{alt_tag_cleaned}'"
+        )
+        return None, None
+    # -----------------------------------------------------------
+
     extension = "png" if output_format == "PNG" else "jpg"
     filename = f"{alt_tag_cleaned}.{extension}"
 
+    # Save the image to a BytesIO buffer
     img_bytes = io.BytesIO()
-    # Save in chosen format
     image.save(img_bytes, format=output_format)
     img_bytes.seek(0)
 
@@ -131,6 +145,13 @@ def export_image(image, alt_tag, output_format):
 # ==============================
 
 st.title("🖼️ SEO Image Alt Tag Generator")
+
+# --------- NEW: Reset Button -----------
+if st.button("Reset App"):
+    st.session_state.clear()
+    st.experimental_rerun()
+# ---------------------------------------
+
 st.markdown("""
 **Welcome!**  
 1. Drag-and-drop individual images or multiple images.  
@@ -168,7 +189,7 @@ all_input_images = []
 if upload_mode == "Upload Images":
     uploaded_files = st.file_uploader(
         "Drag and drop or select images",
-        type=["jpg", "jpeg", "png"],
+        type=["jpg", "jpeg", "png", "webp", "avif"],  # NEW: accept webp + avif
         accept_multiple_files=True
     )
     if uploaded_files:
@@ -188,9 +209,8 @@ elif upload_mode == "Upload a .zip Folder of Images":
                 if not file_info.is_dir():
                     # Only process files with valid image extensions
                     filename_lower = file_info.filename.lower()
-                    if filename_lower.endswith((".jpg", ".jpeg", ".png")):
+                    if filename_lower.endswith((".jpg", ".jpeg", ".png", ".webp", ".avif")):  # NEW
                         file_bytes = zip_ref.read(file_info.filename)
-                        # For display & caching uniqueness, we keep the original name
                         base_name = os.path.basename(file_info.filename)
                         all_input_images.append((base_name, file_bytes))
 
@@ -204,10 +224,8 @@ if all_input_images:
     # Show the images in columns
     col1, col2, col3 = st.columns(3)
     for idx, (img_name, img_bytes_data) in enumerate(all_input_images):
-        # PIL open
         image = Image.open(io.BytesIO(img_bytes_data)).convert("RGB")
 
-        # Display the image in one of three columns
         if idx % 3 == 0:
             col = col1
         elif idx % 3 == 1:
@@ -245,7 +263,6 @@ if all_input_images:
              "Exported Filename")
         ]
 
-        # Go through each image
         for img_name, img_bytes_data in all_input_images:
             # 1. Generate GPT-4 basic caption (cached) for alt text optimization
             if img_name not in st.session_state.image_captions:
@@ -265,9 +282,14 @@ if all_input_images:
 
             # 4. Export with alt-tag-based filename
             img_bytes, exported_filename = export_image(image, optimized_alt_tag, output_format)
+            
+            # If export_image returned None, skip writing to zip & CSV
+            if img_bytes is None or exported_filename is None:
+                continue
+
             zipf.writestr(exported_filename, img_bytes.getvalue())
 
-            # 5. Collect row data for CSV (No GPT-4 caption displayed)
+            # 5. Collect row data for CSV
             alt_tag_length = len(optimized_alt_tag)
             csv_data.append((img_name, optimized_alt_tag, str(alt_tag_length), exported_filename))
 
@@ -286,13 +308,12 @@ if all_input_images:
             mime="application/zip"
         )
 
-        # CREATE CSV in-memory (StringIO for text-based)
+        # CREATE CSV in-memory
         csv_buffer = io.StringIO()
         writer = csv.writer(csv_buffer)
         for row in csv_data:
             writer.writerow(row)
 
-        # Convert CSV content to bytes
         csv_bytes = csv_buffer.getvalue().encode("utf-8")
 
         # ---- Download CSV
