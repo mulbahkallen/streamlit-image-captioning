@@ -1,7 +1,9 @@
 import streamlit as st
 import openai
 from PIL import Image
-import pillow_avif  # Registers AVIF support
+import pillow_heif  # <-- Use pillow-heif instead
+pillow_heif.register_avif_opener()  # Enable AVIF read/write support
+
 import io
 import base64
 import zipfile
@@ -10,7 +12,7 @@ import csv
 import pandas as pd
 import re
 
-# For BLIP
+# For BLIP (if you're using the updated local image captioning approach)
 import torch
 from transformers import BlipProcessor, BlipForConditionalGeneration
 
@@ -28,16 +30,11 @@ openai.api_key = api_key
 
 # ==============================
 #  Load BLIP Model (cached)
+#  (Comment this out if you're not using BLIP)
 # ==============================
 @st.cache_resource
 def load_blip_model():
-    """
-    Loads the BLIP image captioning model and processor from HuggingFace.
-    Cached so we don't re-download/re-init for each run.
-    """
-    model_name = "Salesforce/blip-image-captioning-base"  
-    # or try "Salesforce/blip2-flan-t5-xl" if you have more resources
-
+    model_name = "Salesforce/blip-image-captioning-base"
     processor = BlipProcessor.from_pretrained(model_name)
     model = BlipForConditionalGeneration.from_pretrained(model_name)
     return processor, model
@@ -89,7 +86,7 @@ def optimize_alt_tag_gpt4(
     user_prompt = (
         f"Please create a single, concise alt text.\n\n"
         f"Context:\n"
-        f"- BLIP caption of the image: '{caption}'\n"  # Real image description from BLIP
+        f"- BLIP caption of the image: '{caption}'\n" 
         f"- Filename: '{img_name}'\n"
         f"- Target keywords: {', '.join(keywords)}\n"
         f"- Theme: {theme}\n"
@@ -109,13 +106,12 @@ def optimize_alt_tag_gpt4(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=80,      # limit tokens to avoid run-on answers
-            temperature=0.5     # lower temp for more deterministic results
+            max_tokens=80,
+            temperature=0.5
         )
         alt_tag = response.choices[0].message.content.strip()
     except openai.error.OpenAIError as e:
         st.error(f"OpenAI API error: {e}")
-        # fallback: just truncate the BLIP caption
         return caption[:80] + "..."
 
     # Helper to check if all required keywords & location are included
