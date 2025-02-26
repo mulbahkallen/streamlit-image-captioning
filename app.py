@@ -54,12 +54,8 @@ def generate_caption_with_gpt4(image_bytes):
         messages=[
             {"role": "system", "content": "You are an AI image captioning assistant."},
             {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "Describe this image in detail:"},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
-                ]
-            }
+                {"role": "system", "content": "You are an AI assistant that refines image captions for SEO."},
+                {"role": "user", "content": f"Here’s a short description of the image: {my_existing_caption}\nPlease optimize it for SEO."}
         ],
         max_tokens=150
     )
