@@ -1,0 +1,2 @@
+libheif-dev
+libavif-dev
