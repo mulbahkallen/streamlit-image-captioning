@@ -8,7 +8,9 @@ import zipfile
 import os
 import csv
 import pandas as pd
-import re  # For regex
+import re
+import random  # For injecting optional randomness, if you choose
+import string  # If you want to manipulate random strings, etc.
 
 # ==============================
 #  Load OpenAI API Key
@@ -22,9 +24,11 @@ if not api_key or not api_key.startswith("sk-"):
 # Initialize OpenAI
 openai.api_key = api_key
 
+
 # ==============================
 #  Helper / Utility Functions
 # ==============================
+
 @st.cache_data
 def encode_image_to_base64(image):
     """
@@ -37,34 +41,31 @@ def encode_image_to_base64(image):
     img_base64 = base64.b64encode(img_bytes.getvalue()).decode("utf-8")
     return img_base64
 
-@st.cache_data
-def generate_caption_with_gpt4(image_bytes):
+
+def generate_caption_with_gpt4(image_bytes, img_name):
     """
-    A placeholder function that asks GPT-4
-    to provide a *generic* caption, because
-    sending an actual image is NOT supported.
-    Replace this with a local image-captioning
-    model if you need real image-based captions.
+    Generates a short, somewhat unique placeholder caption
+    by including the filename in the prompt.
+    (No real image analysis is happening here.)
     """
-    # For demonstration, just ask GPT-4
-    # to generate a placeholder caption.
+    # Removed the @st.cache_data decorator so we don't cache identical outputs.
     prompt = (
-        "You are an AI assistant that generates a short, generic description for an image. "
-        "Since we cannot provide actual image data to GPT-4's public API, please produce a "
-        "brief, natural-sounding caption suitable for most images. For example: "
-        "'A photo highlighting a scenic view.'"
+        f"You are an AI assistant that generates a short, generic description for an image. "
+        f"The filename is '{img_name}'. "
+        f"Try to infer minimal context or theme from the filename. "
+        f"Return a concise, natural-sounding caption."
     )
-    response = openai.chat.completions.create(
+
+    response = openai.ChatCompletion.create(
         model="gpt-4",
-        messages=[
-            {"role": "user", "content": prompt}
-        ],
+        messages=[{"role": "user", "content": prompt}],
         max_tokens=50
     )
     return response.choices[0].message.content.strip()
 
+
 @st.cache_data
-def re_run_shortening_gpt4(too_long_text, caption, keywords, theme, location):
+def re_run_shortening_gpt4(too_long_text, caption, keywords, theme, location, img_name):
     """
     If the alt tag is too long, run GPT-4 again with a stricter prompt:
     Must be under 100 characters, but still keep essential SEO context.
@@ -72,16 +73,18 @@ def re_run_shortening_gpt4(too_long_text, caption, keywords, theme, location):
     prompt = (
         f"The following alt text is {len(too_long_text)} characters, "
         f"but it must be under 100 characters.\n"
-        f"Original alt text: '{too_long_text}'\n"
+        f"Original alt text: '{too_long_text}'\n\n"
         f"Please revise it to be strictly under 100 characters, while "
         f"retaining the core SEO essence.\n\n"
+        f"(Context)\n"
         f"Caption: '{caption}'\n"
         f"Target keywords: {', '.join(keywords)}\n"
         f"Theme: {theme}\n"
-        f"Location: {location}\n\n"
+        f"Location: {location}\n"
+        f"Filename: {img_name}\n\n"
         f"Return ONLY the shortened alt text under 100 characters."
     )
-    response = openai.chat.completions.create(
+    response = openai.ChatCompletion.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=100,
@@ -89,8 +92,9 @@ def re_run_shortening_gpt4(too_long_text, caption, keywords, theme, location):
     )
     return response.choices[0].message.content.strip()
 
+
 @st.cache_data
-def optimize_alt_tag_gpt4(caption, keywords, theme, location):
+def optimize_alt_tag_gpt4(caption, keywords, theme, location, img_name):
     """
     Generate an SEO-optimized alt text using GPT-4 with best practices:
     1) Keep under 100 characters.
@@ -98,11 +102,11 @@ def optimize_alt_tag_gpt4(caption, keywords, theme, location):
     3) Naturally include keywords and location.
     4) Avoid "image of", "picture of", etc.
     5) Provide clarity for visually impaired users.
-
-    If the returned alt tag is > 100 characters, re-run GPT-4 with a stricter prompt.
+    6) Use the filename (img_name) to add uniqueness.
     """
     prompt = (
         f"Image caption: '{caption}'.\n"
+        f"Filename (for added context): '{img_name}'.\n"
         f"Target keywords: {', '.join(keywords)}.\n"
         f"Theme: {theme}.\n"
         f"Location: {location}.\n\n"
@@ -114,7 +118,7 @@ def optimize_alt_tag_gpt4(caption, keywords, theme, location):
         f"5️⃣ Provide clarity for visually impaired users.\n\n"
         f"Return ONLY the final alt text, nothing else."
     )
-    response = openai.chat.completions.create(
+    response = openai.ChatCompletion.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=100,
@@ -126,9 +130,17 @@ def optimize_alt_tag_gpt4(caption, keywords, theme, location):
     for _ in range(3):
         if len(alt_tag) <= 100:
             break
-        alt_tag = re_run_shortening_gpt4(alt_tag, caption, keywords, theme, location)
+        alt_tag = re_run_shortening_gpt4(
+            too_long_text=alt_tag,
+            caption=caption,
+            keywords=keywords,
+            theme=theme,
+            location=location,
+            img_name=img_name
+        )
 
     return alt_tag
+
 
 def resize_image(image, max_width):
     """
@@ -137,9 +149,9 @@ def resize_image(image, max_width):
     if image.width > max_width:
         ratio = max_width / float(image.width)
         new_height = int(ratio * float(image.height))
-        # ANTIALIAS is deprecated in newer Pillow versions, but still recognized
         image = image.resize((max_width, new_height), Image.ANTIALIAS)
     return image
+
 
 def export_image(image, alt_tag, user_format_choice):
     """
@@ -184,6 +196,7 @@ def export_image(image, alt_tag, user_format_choice):
     img_bytes.seek(0)
 
     return img_bytes, filename
+
 
 # ==============================
 #  Streamlit UI
@@ -285,7 +298,7 @@ if all_input_images:
     st.markdown("---")
     st.markdown("### Provide Keywords, Theme & Location")
     st.markdown("These will help GPT-4 optimize the alt text for SEO, including local context.")
-    
+
     keywords_input = st.text_input("🔑 Enter target keywords (comma-separated):", "")
     theme_input = st.text_input("🎨 Enter the theme of the photos:", "")
     location_input = st.text_input("📍 Enter location (for local SEO):", "")
@@ -311,15 +324,23 @@ if all_input_images:
 
         for img_name, img_bytes_data in all_input_images:
             # 1. Generate a (placeholder) GPT-4 caption, if not cached
-            if img_name not in st.session_state.image_captions:
+            if img_name not in st.session_state["image_captions"]:
                 with st.spinner(f"Generating a placeholder GPT-4 caption for {img_name}..."):
-                    st.session_state.image_captions[img_name] = generate_caption_with_gpt4(img_bytes_data)
+                    st.session_state["image_captions"][img_name] = generate_caption_with_gpt4(
+                        img_bytes_data, img_name
+                    )
 
-            basic_caption = st.session_state.image_captions[img_name]
+            basic_caption = st.session_state["image_captions"][img_name]
 
             # 2. Optimize alt text
             with st.spinner(f"Optimizing Alt Tag for {img_name}..."):
-                optimized_alt_tag = optimize_alt_tag_gpt4(basic_caption, keywords, theme, location)
+                optimized_alt_tag = optimize_alt_tag_gpt4(
+                    caption=basic_caption,
+                    keywords=keywords,
+                    theme=theme,
+                    location=location,
+                    img_name=img_name
+                )
 
             # 3. Resize if needed
             image = Image.open(io.BytesIO(img_bytes_data)).convert("RGB")
