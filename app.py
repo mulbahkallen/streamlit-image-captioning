@@ -27,17 +27,6 @@ openai.api_key = api_key
 #  Helper / Utility Functions
 # ==============================
 
-@st.cache_data
-def encode_image_to_base64(image: Image.Image) -> str:
-    """
-    Convert a PIL Image to base64 string (PNG).
-    Caching helps avoid re-encoding the same image on repeated runs.
-    """
-    img_bytes = io.BytesIO()
-    image.save(img_bytes, format="PNG")
-    return base64.b64encode(img_bytes.getvalue()).decode("utf-8")
-
-
 def re_run_shortening_gpt4(
     too_long_text: str,
     caption: str,
@@ -80,39 +69,29 @@ def re_run_shortening_gpt4(
         # Fallback: just return the original
         return too_long_text
 
-
-@st.cache_data
 def generate_caption_with_gpt4(image_bytes: bytes) -> str:
     """
-    Attempt to perform real image analysis by sending base64-encoded PNG data
-    to a hypothetical 'gpt-4-turbo' model that accepts 'image_url' content.
-    This is purely demonstrational. It will fail on standard public APIs.
+    Generates a brief, placeholder caption by sending minimal context to GPT-4.
+    (No real image analysis is actually performed in the public API.)
     """
-    # Convert raw bytes into a PIL image
-    pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    img_base64 = encode_image_to_base64(pil_img)
-
-    # Attempt a GPT-4 "Vision" request (non-public)
+    system_prompt = "You are a helpful assistant that creates short image descriptions."
+    user_prompt = (
+        f"Please provide a short, generic description for an uploaded image. "
+        f"Keep it under 50 characters, if possible."
+    )
     try:
         response = openai.chat.completions.create(
-            model="gpt-4-turbo",  # Hypothetical model
+            model="gpt-4",
             messages=[
-                {"role": "system", "content": "You are an AI image captioning assistant."},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Describe this image in detail:"},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
-                    ]
-                }
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
             ],
-            max_tokens=150
+            max_tokens=50
         )
         return response.choices[0].message.content.strip()
     except openai.error.OpenAIError as e:
         st.error(f"OpenAI API error: {e}")
-        return "(Failed to generate real image caption)"
-
+        return "(Placeholder caption)"
 
 def optimize_alt_tag_gpt4(
     caption: str,
@@ -128,7 +107,7 @@ def optimize_alt_tag_gpt4(
       3) Include keywords & location
       4) Avoid 'image of', 'picture of'
       5) Clarity for visually impaired
-      6) Use filename context for uniqueness
+      6) Use the context for uniqueness
     """
     system_prompt = "You are a helpful SEO assistant creating concise alt text."
     user_prompt = (
@@ -178,7 +157,6 @@ def optimize_alt_tag_gpt4(
 
     return alt_tag
 
-
 def resize_image(image: Image.Image, max_width: int) -> Image.Image:
     """If the image is wider than max_width, resize it (preserving aspect ratio)."""
     if image.width > max_width:
@@ -186,7 +164,6 @@ def resize_image(image: Image.Image, max_width: int) -> Image.Image:
         new_height = int(ratio * float(image.height))
         image = image.resize((max_width, new_height), Image.ANTIALIAS)
     return image
-
 
 def export_image(
     image: Image.Image,
@@ -346,7 +323,7 @@ if all_input_images:
     theme_input = st.text_input("🎨 Theme of the photos:", "")
     location_input = st.text_input("📍 Location (for local SEO):", "")
 
-    # ============ Step 3: Button to Generate & Show Alt Text Preview ============
+    # ============ Step 3: Button to Generate & Preview Alt Text ============
     if st.button("🚀 Generate & Preview Alt Texts"):
         if not keywords_input.strip() or not theme_input.strip() or not location_input.strip():
             st.warning("Please provide keywords, theme, and location to proceed.")
@@ -360,28 +337,28 @@ if all_input_images:
         preview_data = []
 
         st.markdown("---")
-        st.markdown("#### GPT-4 Alt Text Preview (Attempting Real Image Analysis)")
+        st.markdown("#### Alt Text Preview")
         col1, col2, col3 = st.columns(3)
 
         for idx, (img_name, img_bytes_data) in enumerate(all_input_images):
-            # 1) Generate or retrieve GPT-4 "Vision" caption
+            # Generate or retrieve short placeholder caption
             if img_name not in st.session_state["image_captions"]:
-                with st.spinner(f"Generating GPT-4 vision caption for {img_name}..."):
+                with st.spinner(f"Generating a short placeholder caption for {img_name}..."):
                     st.session_state["image_captions"][img_name] = generate_caption_with_gpt4(img_bytes_data)
 
-            gpt_caption = st.session_state["image_captions"][img_name]
+            basic_caption = st.session_state["image_captions"][img_name]
 
-            # 2) Optimize alt text
+            # Optimize alt text
             with st.spinner(f"Optimizing alt text for {img_name}..."):
                 optimized_alt_tag = optimize_alt_tag_gpt4(
-                    caption=gpt_caption,
+                    caption=basic_caption,
                     keywords=keywords,
                     theme=theme,
                     location=location,
                     img_name=img_name
                 )
 
-            # 3) Resize if needed
+            # Resize if needed
             image = Image.open(io.BytesIO(img_bytes_data)).convert("RGB")
             if resize_option and max_width_setting:
                 image = resize_image(image, max_width_setting)
@@ -395,8 +372,7 @@ if all_input_images:
                 col = col3
 
             col.image(image, caption=img_name, width=150)
-            col.write(f"**GPT-4 Caption:** {gpt_caption}")
-            col.write(f"**Optimized Alt Text:** {optimized_alt_tag}")
+            col.write(f"**Alt Text:** {optimized_alt_tag}")
 
             # Store for final export
             preview_data.append((img_name, image, optimized_alt_tag))
@@ -411,7 +387,7 @@ if all_input_images:
 
             # Prepare CSV data
             csv_data = [
-                ("Original Filename", "GPT-4 Caption", "Optimized Alt Text", "Alt Text Length", "Exported Filename")
+                ("Original Filename", "Optimized Alt Text", "Alt Text Length", "Exported Filename")
             ]
 
             for img_name, final_image, alt_tag in preview_data:
@@ -421,9 +397,7 @@ if all_input_images:
                 zipf.writestr(exported_filename, img_bytes.getvalue())
 
                 alt_len = len(alt_tag)
-                # We also show the GPT-4 raw caption from session_state
-                raw_caption = st.session_state["image_captions"][img_name]
-                csv_data.append((img_name, raw_caption, alt_tag, str(alt_len), exported_filename))
+                csv_data.append((img_name, alt_tag, str(alt_len), exported_filename))
 
             zipf.close()
             zip_buffer.seek(0)
@@ -451,7 +425,7 @@ if all_input_images:
                 mime="text/csv"
             )
 
-            # Show summary
+            # Show summary table
             st.markdown("#### Summary Table")
             headers = csv_data[0]
             rows = csv_data[1:]
