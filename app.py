@@ -10,6 +10,10 @@ import csv
 import pandas as pd
 import re
 
+# For BLIP
+import torch
+from transformers import BlipProcessor, BlipForConditionalGeneration
+
 # ==============================
 #  Load OpenAI API Key
 # ==============================
@@ -23,46 +27,36 @@ if not api_key or not api_key.startswith("sk-"):
 openai.api_key = api_key
 
 # ==============================
+#  Load BLIP Model (cached)
+# ==============================
+@st.cache_resource
+def load_blip_model():
+    """
+    Loads the BLIP image captioning model and processor from HuggingFace.
+    Cached so we don't re-download/re-init for each run.
+    """
+    model_name = "Salesforce/blip-image-captioning-base"  
+    # or try "Salesforce/blip2-flan-t5-xl" if you have more resources
+
+    processor = BlipProcessor.from_pretrained(model_name)
+    model = BlipForConditionalGeneration.from_pretrained(model_name)
+    return processor, model
+
+processor, blip_model = load_blip_model()
+
+def blip_generate_caption(image: Image.Image) -> str:
+    """
+    Uses BLIP to generate an actual descriptive caption for the image.
+    """
+    inputs = processor(image, return_tensors="pt")
+    with torch.no_grad():
+        output = blip_model.generate(**inputs, max_new_tokens=50)
+    caption = processor.decode(output[0], skip_special_tokens=True)
+    return caption.strip()
+
+# ==============================
 #  Helper / Utility Functions
 # ==============================
-
-def generate_caption_with_gpt4(
-    image_bytes: bytes,
-    keywords: list[str],
-    theme: str,
-    location: str
-) -> str:
-    """
-    Generates a short placeholder caption by sending minimal context to GPT-4.
-    We'll include some context (keywords, theme, location) to produce a
-    more relevant placeholder than a purely generic line.
-    """
-    system_prompt = (
-        "You are a helpful assistant that creates short, descriptive captions. "
-        "Captions should be under ~50 characters if possible."
-    )
-    user_prompt = (
-        f"Please provide a short caption for an uploaded image.\n"
-        f"These are the relevant details (for possible context):\n"
-        f"- Theme: {theme}\n"
-        f"- Location: {location}\n"
-        f"- Keywords: {', '.join(keywords)}\n\n"
-        f"Return ONLY the caption, nothing else."
-    )
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            max_tokens=50,
-            temperature=0.7
-        )
-        return response.choices[0].message.content.strip()
-    except openai.error.OpenAIError as e:
-        st.error(f"OpenAI API error: {e}")
-        return "(Placeholder caption)"
 
 def optimize_alt_tag_gpt4(
     caption: str,
@@ -95,7 +89,7 @@ def optimize_alt_tag_gpt4(
     user_prompt = (
         f"Please create a single, concise alt text.\n\n"
         f"Context:\n"
-        f"- Image caption: '{caption}'\n"
+        f"- BLIP caption of the image: '{caption}'\n"  # Real image description from BLIP
         f"- Filename: '{img_name}'\n"
         f"- Target keywords: {', '.join(keywords)}\n"
         f"- Theme: {theme}\n"
@@ -105,8 +99,7 @@ def optimize_alt_tag_gpt4(
         f"2. Must include the location.\n"
         f"3. Must remain under 100 characters total.\n"
         f"4. Avoid phrases like 'image of' or 'picture of'.\n"
-        f"5. If the caption is unhelpful, use best judgment for context.\n\n"
-        f"Return ONLY the final alt text. Do not add commentary."
+        f"5. Return ONLY the final alt text (no commentary)."
     )
 
     try:
@@ -122,6 +115,7 @@ def optimize_alt_tag_gpt4(
         alt_tag = response.choices[0].message.content.strip()
     except openai.error.OpenAIError as e:
         st.error(f"OpenAI API error: {e}")
+        # fallback: just truncate the BLIP caption
         return caption[:80] + "..."
 
     # Helper to check if all required keywords & location are included
@@ -235,7 +229,7 @@ def export_image(
 # ==============================
 #  Streamlit UI
 # ==============================
-st.title("🖼️ SEO Image Alt Tag Generator")
+st.title("🖼️ SEO Image Alt Tag Generator (BLIP + GPT-4)")
 
 # Session key for reloading the uploader
 if "upload_key" not in st.session_state:
@@ -243,8 +237,8 @@ if "upload_key" not in st.session_state:
 
 # Reset App Button
 if st.button("Reset App"):
-    if "image_captions" in st.session_state:
-        del st.session_state["image_captions"]
+    if "blip_captions" in st.session_state:
+        del st.session_state["blip_captions"]
     st.session_state["upload_key"] += 1
 
 st.markdown("""
@@ -252,7 +246,8 @@ st.markdown("""
 1. Upload or drag-and-drop images (individual or multiple).  
 2. Alternatively, upload a **.zip folder** of images.  
 3. Provide your **keywords**, **theme**, and **location** for local SEO.  
-4. Generate a ZIP with renamed images **and** a CSV file for metadata.
+4. A BLIP model will first describe your image. Then GPT-4 will generate a final alt tag.  
+5. Download a ZIP with renamed images **and** a CSV file for metadata.
 """)
 
 # --- Advanced Settings ---
@@ -313,9 +308,9 @@ elif upload_mode == "Upload a .zip Folder of Images":
 if all_input_images:
     st.success(f"**Total Images Found**: {len(all_input_images)}")
 
-    # If we haven't stored captions in session yet, do so now
-    if "image_captions" not in st.session_state:
-        st.session_state["image_captions"] = {}
+    # If we haven't stored BLIP captions in session yet, do so now
+    if "blip_captions" not in st.session_state:
+        st.session_state["blip_captions"] = {}
 
     # Display the uploaded images as thumbnails
     st.markdown("#### Uploaded Images")
@@ -354,39 +349,36 @@ if all_input_images:
 
         # Prepare CSV data
         csv_data = [
-            ("Original Filename", "Optimized Alt Text", "Alt Text Length", "Exported Filename")
+            ("Original Filename", "BLIP Caption", "Optimized Alt Text", "Alt Text Length", "Exported Filename")
         ]
 
         for img_name, img_bytes_data in all_input_images:
-            # Step 1: Generate or retrieve short placeholder caption
-            if img_name not in st.session_state["image_captions"]:
-                with st.spinner(f"Generating a short placeholder caption for {img_name}..."):
-                    st.session_state["image_captions"][img_name] = generate_caption_with_gpt4(
-                        img_bytes_data,
-                        keywords,
-                        theme,
-                        location
-                    )
+            # Step A: BLIP-based caption
+            if img_name not in st.session_state["blip_captions"]:
+                with st.spinner(f"Generating BLIP caption for {img_name}..."):
+                    pil_img = Image.open(io.BytesIO(img_bytes_data)).convert("RGB")
+                    blip_caption = blip_generate_caption(pil_img)
+                    st.session_state["blip_captions"][img_name] = blip_caption
 
-            basic_caption = st.session_state["image_captions"][img_name]
+            blip_caption = st.session_state["blip_captions"][img_name]
 
-            # Step 2: Optimize alt text
+            # Step B: GPT-4 alt text
             with st.spinner(f"Optimizing alt text for {img_name}..."):
                 optimized_alt_tag = optimize_alt_tag_gpt4(
-                    caption=basic_caption,
+                    caption=blip_caption,
                     keywords=keywords,
                     theme=theme,
                     location=location,
                     img_name=img_name
                 )
 
-            # Step 3: Resize if needed
-            image = Image.open(io.BytesIO(img_bytes_data)).convert("RGB")
+            # Step C: Resize if needed
+            pil_img = Image.open(io.BytesIO(img_bytes_data)).convert("RGB")
             if resize_option and max_width_setting:
-                image = resize_image(image, max_width_setting)
+                pil_img = resize_image(pil_img, max_width_setting)
 
-            # Step 4: Export the image with alt-tag-based filename
-            img_bytes, exported_filename = export_image(image, optimized_alt_tag, user_format_choice)
+            # Step D: Export the image with alt-tag-based filename
+            img_bytes, exported_filename = export_image(pil_img, optimized_alt_tag, user_format_choice)
             if img_bytes is None or exported_filename is None:
                 continue
 
@@ -395,7 +387,7 @@ if all_input_images:
 
             # Collect CSV row
             alt_len = len(optimized_alt_tag)
-            csv_data.append((img_name, optimized_alt_tag, str(alt_len), exported_filename))
+            csv_data.append((img_name, blip_caption, optimized_alt_tag, str(alt_len), exported_filename))
 
         zipf.close()
         zip_buffer.seek(0)
@@ -423,7 +415,7 @@ if all_input_images:
             mime="text/csv"
         )
 
-        # ---- Display Summary Table (mimics the CSV structure)
+        # ---- Display Summary Table
         st.markdown("#### Summary Table")
         headers = csv_data[0]
         rows = csv_data[1:]
