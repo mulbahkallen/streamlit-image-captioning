@@ -8,6 +8,7 @@ import os
 import csv
 import pandas as pd
 import re  # <-- NEW for regex
+import pillow_avif  # registers AVIF support
 
 # ==============================
 #  Load OpenAI API Key
