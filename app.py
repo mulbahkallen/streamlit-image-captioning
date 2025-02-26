@@ -9,8 +9,8 @@ import os
 import csv
 import pandas as pd
 import re
-import random  # For injecting optional randomness, if you choose
-import string  # If you want to manipulate random strings, etc.
+import random  # For optional randomness
+import string  # If you want random string usage
 
 # ==============================
 #  Load OpenAI API Key
@@ -33,8 +33,7 @@ openai.api_key = api_key
 def encode_image_to_base64(image):
     """
     Convert PIL image to base64 string.
-    (We won't be using this for GPT-4 anymore,
-    but we keep it in case you need it elsewhere.)
+    (We won't be sending this to GPT, but kept here in case you need it elsewhere.)
     """
     img_bytes = io.BytesIO()
     image.save(img_bytes, format="PNG")
@@ -44,38 +43,45 @@ def encode_image_to_base64(image):
 
 def generate_caption_with_gpt4(image_bytes, img_name):
     """
-    Generates a short, somewhat unique placeholder caption
-    by including the filename in the prompt.
+    Generates a short placeholder caption by including the filename in the prompt.
     (No real image analysis is happening here.)
+    Removed @st.cache_data to avoid identical outputs for repeated calls.
     """
-    # Removed the @st.cache_data decorator so we don't cache identical outputs.
-    prompt = (
-        f"You are an AI assistant that generates a short, generic description for an image. "
+    system_prompt = "You are a helpful assistant that creates short image captions."
+    user_prompt = (
+        f"Please create a short, generic description for an image. "
         f"The filename is '{img_name}'. "
         f"Try to infer minimal context or theme from the filename. "
         f"Return a concise, natural-sounding caption."
     )
 
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=50
-    )
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=50
+        )
+    except openai.error.OpenAIError as e:
+        st.error(f"OpenAI API error: {e}")
+        return "Default placeholder caption"
+
     return response.choices[0].message.content.strip()
 
 
 @st.cache_data
 def re_run_shortening_gpt4(too_long_text, caption, keywords, theme, location, img_name):
     """
-    If the alt tag is too long, run GPT-4 again with a stricter prompt:
+    If the alt text is too long, run GPT-4 again with a stricter prompt:
     Must be under 100 characters, but still keep essential SEO context.
     """
-    prompt = (
-        f"The following alt text is {len(too_long_text)} characters, "
-        f"but it must be under 100 characters.\n"
+    system_prompt = "You are a helpful assistant that shortens alt text under strict constraints."
+    user_prompt = (
+        f"The following alt text is {len(too_long_text)} characters, but it must be under 100.\n"
         f"Original alt text: '{too_long_text}'\n\n"
-        f"Please revise it to be strictly under 100 characters, while "
-        f"retaining the core SEO essence.\n\n"
+        f"Please revise it to be strictly under 100 characters, while retaining the SEO essence.\n\n"
         f"(Context)\n"
         f"Caption: '{caption}'\n"
         f"Target keywords: {', '.join(keywords)}\n"
@@ -84,12 +90,21 @@ def re_run_shortening_gpt4(too_long_text, caption, keywords, theme, location, im
         f"Filename: {img_name}\n\n"
         f"Return ONLY the shortened alt text under 100 characters."
     )
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=100,
-        temperature=0.7
-    )
+
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=100,
+            temperature=0.7
+        )
+    except openai.error.OpenAIError as e:
+        st.error(f"OpenAI API error: {e}")
+        return too_long_text  # fallback to original
+
     return response.choices[0].message.content.strip()
 
 
@@ -104,7 +119,8 @@ def optimize_alt_tag_gpt4(caption, keywords, theme, location, img_name):
     5) Provide clarity for visually impaired users.
     6) Use the filename (img_name) to add uniqueness.
     """
-    prompt = (
+    system_prompt = "You are a helpful SEO assistant creating concise alt text."
+    user_prompt = (
         f"Image caption: '{caption}'.\n"
         f"Filename (for added context): '{img_name}'.\n"
         f"Target keywords: {', '.join(keywords)}.\n"
@@ -118,12 +134,22 @@ def optimize_alt_tag_gpt4(caption, keywords, theme, location, img_name):
         f"5️⃣ Provide clarity for visually impaired users.\n\n"
         f"Return ONLY the final alt text, nothing else."
     )
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=100,
-        temperature=0.7
-    )
+
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=100,
+            temperature=0.7
+        )
+    except openai.error.OpenAIError as e:
+        st.error(f"OpenAI API error: {e}")
+        # fallback to something short
+        return f"{caption[:80]}..."
+
     alt_tag = response.choices[0].message.content.strip()
 
     # Re-run up to 3 times if GPT doesn't respect the length
