@@ -149,7 +149,7 @@ st.title("🖼️ SEO Image Alt Tag Generator")
 # --------- NEW: Reset Button -----------
 if st.button("Reset App"):
     st.session_state.clear()
-    st.experimental_rerun()
+    #st.experimental_rerun()
 # ---------------------------------------
 
 st.markdown("""
