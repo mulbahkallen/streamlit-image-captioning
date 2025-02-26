@@ -154,10 +154,10 @@ if st.button("Reset App"):
 
 st.markdown("""
 **Welcome!**  
-1. Drag-and-drop individual images or multiple images.  
+1. Upload or drag-and-drop individual images or multiple images.  
 2. Alternatively, upload a **.zip folder** of images if you have a folder of images.  
 3. Provide your **keywords**, **theme**, and **location** for local SEO.  
-4. Generate a GPT-4 caption (internally) and SEO-optimized alt tags.  
+4. Generate SEO-optimized alt tags.  
 5. Download a ZIP with renamed images **and** a CSV metadata file.
 """)
 
