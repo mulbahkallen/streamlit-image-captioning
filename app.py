@@ -22,7 +22,6 @@ if not api_key or not api_key.startswith("sk-"):
 # Initialize OpenAI
 openai.api_key = api_key
 
-
 # ==============================
 #  Helper / Utility Functions
 # ==============================
@@ -72,7 +71,7 @@ def re_run_shortening_gpt4(
 def generate_caption_with_gpt4(image_bytes: bytes) -> str:
     """
     Generates a brief, placeholder caption by sending minimal context to GPT-4.
-    (No real image analysis is actually performed in the public API.)
+    (No real image analysis is actually performed.)
     """
     system_prompt = "You are a helpful assistant that creates short image descriptions."
     user_prompt = (
@@ -107,7 +106,7 @@ def optimize_alt_tag_gpt4(
       3) Include keywords & location
       4) Avoid 'image of', 'picture of'
       5) Clarity for visually impaired
-      6) Use the context for uniqueness
+      6) Use minimal context for uniqueness
     """
     system_prompt = "You are a helpful SEO assistant creating concise alt text."
     user_prompt = (
@@ -137,7 +136,6 @@ def optimize_alt_tag_gpt4(
         )
     except openai.error.OpenAIError as e:
         st.error(f"OpenAI API error: {e}")
-        # fallback
         return caption[:80] + "..."
 
     alt_tag = response.choices[0].message.content.strip()
@@ -176,15 +174,15 @@ def export_image(
     Return (img_bytes, filename) or (None, None) on failure.
     """
     # Clean alt_tag for filename
-    alt_tag = alt_tag.strip('"').strip("'")
     alt_tag_cleaned = (
-        alt_tag.replace('"', "")
-               .replace("'", "")
-               .replace(" ", "_")
-               .replace(",", "")
-               .replace(".", "")
-               .replace("/", "")
-               .replace("\\", "")
+        alt_tag.strip()
+              .replace('"', "")
+              .replace("'", "")
+              .replace(" ", "_")
+              .replace(",", "")
+              .replace(".", "")
+              .replace("/", "")
+              .replace("\\", "")
     )
     # Remove leading non-alphanumeric
     alt_tag_cleaned = re.sub(r'^[^a-zA-Z0-9]+', '', alt_tag_cleaned)
@@ -209,8 +207,12 @@ def export_image(
 
     # Save image to in-memory buffer
     img_bytes = io.BytesIO()
-    image.save(img_bytes, format=pillow_format)
-    img_bytes.seek(0)
+    try:
+        image.save(img_bytes, format=pillow_format)
+        img_bytes.seek(0)
+    except ValueError as e:
+        st.error(f"Image save error: {e}")
+        return None, None
 
     return img_bytes, filename
 
@@ -235,7 +237,7 @@ st.markdown("""
 1. Upload or drag-and-drop images (individual or multiple).  
 2. Alternatively, upload a **.zip folder** of images.  
 3. Provide your **keywords**, **theme**, and **location** for local SEO.  
-4. Download a ZIP with renamed images **and** a CSV metadata file.
+4. Generate a ZIP with renamed images **and** a CSV file for metadata.
 """)
 
 # --- Advanced Settings ---
@@ -300,7 +302,7 @@ if all_input_images:
     if "image_captions" not in st.session_state:
         st.session_state["image_captions"] = {}
 
-    # ============ Step 1: Show Thumbnails (before generation) ============
+    # Display the uploaded images as thumbnails
     st.markdown("#### Uploaded Images")
     colA, colB, colC = st.columns(3)
     for i, (img_name, img_bytes_data) in enumerate(all_input_images):
@@ -311,10 +313,8 @@ if all_input_images:
             col = colB
         else:
             col = colC
-
         col.image(image, caption=img_name, width=150)
 
-    # ============ Step 2: Ask for SEO Inputs ============
     st.markdown("---")
     st.markdown("### Provide Keywords, Theme, & Location")
     st.markdown("These will help GPT-4 optimize the alt text for SEO, including local context.")
@@ -323,8 +323,8 @@ if all_input_images:
     theme_input = st.text_input("🎨 Theme of the photos:", "")
     location_input = st.text_input("📍 Location (for local SEO):", "")
 
-    # ============ Step 3: Button to Generate & Preview Alt Text ============
-    if st.button("🚀 Generate & Preview Alt Texts"):
+    # Single step: Generate & Download
+    if st.button("🚀 Generate & Download Alt-Optimized Images"):
         if not keywords_input.strip() or not theme_input.strip() or not location_input.strip():
             st.warning("Please provide keywords, theme, and location to proceed.")
             st.stop()
@@ -333,22 +333,24 @@ if all_input_images:
         theme = theme_input.strip()
         location = location_input.strip()
 
-        # We'll store tuples of (img_name, resized_image, final_alt_text)
-        preview_data = []
+        # Create an in-memory ZIP
+        zip_buffer = io.BytesIO()
+        zipf = zipfile.ZipFile(zip_buffer, "w")
 
-        st.markdown("---")
-        st.markdown("#### Alt Text Preview")
-        col1, col2, col3 = st.columns(3)
+        # Prepare CSV data
+        csv_data = [
+            ("Original Filename", "Optimized Alt Text", "Alt Text Length", "Exported Filename")
+        ]
 
-        for idx, (img_name, img_bytes_data) in enumerate(all_input_images):
-            # Generate or retrieve short placeholder caption
+        for img_name, img_bytes_data in all_input_images:
+            # Step 1: Generate or retrieve short placeholder caption
             if img_name not in st.session_state["image_captions"]:
                 with st.spinner(f"Generating a short placeholder caption for {img_name}..."):
                     st.session_state["image_captions"][img_name] = generate_caption_with_gpt4(img_bytes_data)
 
             basic_caption = st.session_state["image_captions"][img_name]
 
-            # Optimize alt text
+            # Step 2: Optimize alt text
             with st.spinner(f"Optimizing alt text for {img_name}..."):
                 optimized_alt_tag = optimize_alt_tag_gpt4(
                     caption=basic_caption,
@@ -358,76 +360,52 @@ if all_input_images:
                     img_name=img_name
                 )
 
-            # Resize if needed
+            # Step 3: Resize if needed
             image = Image.open(io.BytesIO(img_bytes_data)).convert("RGB")
             if resize_option and max_width_setting:
                 image = resize_image(image, max_width_setting)
 
-            # Display a preview
-            if idx % 3 == 0:
-                col = col1
-            elif idx % 3 == 1:
-                col = col2
-            else:
-                col = col3
+            # Step 4: Export the image with alt-tag-based filename
+            img_bytes, exported_filename = export_image(image, optimized_alt_tag, user_format_choice)
+            if img_bytes is None or exported_filename is None:
+                continue
 
-            col.image(image, caption=img_name, width=150)
-            col.write(f"**Alt Text:** {optimized_alt_tag}")
+            # Write to ZIP
+            zipf.writestr(exported_filename, img_bytes.getvalue())
 
-            # Store for final export
-            preview_data.append((img_name, image, optimized_alt_tag))
+            # Collect CSV row
+            alt_len = len(optimized_alt_tag)
+            csv_data.append((img_name, optimized_alt_tag, str(alt_len), exported_filename))
 
-        # ============ Step 4: Button to Download ZIP & CSV ============
-        st.markdown("---")
-        st.markdown("### Download Your Optimized Files")
-        if st.button("💾 Download ZIP + CSV"):
-            # Create ZIP in memory
-            zip_buffer = io.BytesIO()
-            zipf = zipfile.ZipFile(zip_buffer, "w")
+        zipf.close()
+        zip_buffer.seek(0)
 
-            # Prepare CSV data
-            csv_data = [
-                ("Original Filename", "Optimized Alt Text", "Alt Text Length", "Exported Filename")
-            ]
+        # ---- Download ZIP
+        st.download_button(
+            label="📥 Download ZIP of Optimized Images",
+            data=zip_buffer,
+            file_name="optimized_images.zip",
+            mime="application/zip"
+        )
 
-            for img_name, final_image, alt_tag in preview_data:
-                img_bytes, exported_filename = export_image(final_image, alt_tag, user_format_choice)
-                if img_bytes is None or exported_filename is None:
-                    continue
-                zipf.writestr(exported_filename, img_bytes.getvalue())
+        # Create CSV in memory
+        csv_buffer = io.StringIO()
+        writer = csv.writer(csv_buffer)
+        for row in csv_data:
+            writer.writerow(row)
+        csv_bytes = csv_buffer.getvalue().encode("utf-8")
 
-                alt_len = len(alt_tag)
-                csv_data.append((img_name, alt_tag, str(alt_len), exported_filename))
+        # ---- Download CSV
+        st.download_button(
+            label="📄 Download CSV Metadata",
+            data=csv_bytes,
+            file_name="image_metadata.csv",
+            mime="text/csv"
+        )
 
-            zipf.close()
-            zip_buffer.seek(0)
-
-            # Download ZIP
-            st.download_button(
-                label="📥 Download ZIP of Optimized Images",
-                data=zip_buffer,
-                file_name="optimized_images.zip",
-                mime="application/zip"
-            )
-
-            # Create CSV in memory
-            csv_buffer = io.StringIO()
-            writer = csv.writer(csv_buffer)
-            for row in csv_data:
-                writer.writerow(row)
-            csv_bytes = csv_buffer.getvalue().encode("utf-8")
-
-            # Download CSV
-            st.download_button(
-                label="📄 Download CSV Metadata",
-                data=csv_bytes,
-                file_name="image_metadata.csv",
-                mime="text/csv"
-            )
-
-            # Show summary table
-            st.markdown("#### Summary Table")
-            headers = csv_data[0]
-            rows = csv_data[1:]
-            df = pd.DataFrame(rows, columns=headers)
-            st.dataframe(df, use_container_width=True)
+        # ---- Display Summary Table (mimics the CSV structure)
+        st.markdown("#### Summary Table")
+        headers = csv_data[0]
+        rows = csv_data[1:]
+        df = pd.DataFrame(rows, columns=headers)
+        st.dataframe(df, use_container_width=True)
