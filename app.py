@@ -49,7 +49,7 @@ def generate_caption_with_gpt4(image_bytes):
     # NOTE: GPT-4 image support is hypothetical here. This code
     # shows the concept of sending an image, though real usage
     # may differ. GPT-4 with Vision is not publicly available via standard API.
-    response = openai.ChatCompletion.create(
+    response = openai.chat.completions.create(
         model="gpt-4",
         messages=[
             {"role": "system", "content": "You are an AI image captioning assistant."},
