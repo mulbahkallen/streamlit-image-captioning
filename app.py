@@ -27,10 +27,7 @@ openai.api_key = api_key
 # ==============================
 
 def generate_caption_with_gpt4(img_name: str) -> str:
-    """
-    Generates a short placeholder caption by using only the filename as a clue.
-    No real image analysis is happening here.
-    """
+   
     system_prompt = "You are a helpful assistant that creates short image captions."
     user_prompt = (
         f"Please create a short, generic description for an image. "
@@ -235,9 +232,8 @@ st.markdown("""
 **Welcome!**  
 1. Upload or drag-and-drop images (individual or multiple).  
 2. Alternatively, upload a **.zip folder** of images.  
-3. Provide your **keywords**, **theme**, and **location** for local SEO.  
-4. *We generate a placeholder GPT-4 caption (no real image analysis) and then an SEO-optimized alt tag.*  
-5. Download a ZIP with renamed images **and** a CSV metadata file.
+3. Provide your **keywords**, **theme**, and **location** for local SEO.   
+4. Download a ZIP with renamed images **and** a CSV metadata file.
 """)
 
 # --- Advanced Settings ---
