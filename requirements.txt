@@ -3,7 +3,6 @@ torch
 transformers
 openai
 pillow>=9.0
-pillow-avif-plugin
 accelerate
 pillow
 pillow_avif
