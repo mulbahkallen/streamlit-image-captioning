@@ -1,7 +1,7 @@
 import streamlit as st
 import openai
 from PIL import Image
-import pillow_heif  # <-- Use pillow-heif instead
+import pillow_heif  # Replaces pillow_avif
 pillow_heif.register_avif_opener()  # Enable AVIF read/write support
 
 import io
@@ -12,7 +12,6 @@ import csv
 import pandas as pd
 import re
 
-# For BLIP (if you're using the updated local image captioning approach)
 import torch
 from transformers import BlipProcessor, BlipForConditionalGeneration
 
@@ -30,7 +29,6 @@ openai.api_key = api_key
 
 # ==============================
 #  Load BLIP Model (cached)
-#  (Comment this out if you're not using BLIP)
 # ==============================
 @st.cache_resource
 def load_blip_model():
@@ -60,7 +58,8 @@ def optimize_alt_tag_gpt4(
     keywords: list[str],
     theme: str,
     location: str,
-    img_name: str
+    img_name: str,
+    gpt_temperature: float
 ) -> str:
     """
     Improved version of the alt text generator:
@@ -69,6 +68,7 @@ def optimize_alt_tag_gpt4(
       - Avoid phrases like 'image of'.
       - Provide clarity for visually impaired.
       - Re-run if missing any requirements.
+      - Uses user-selected GPT temperature for "creativity".
     """
 
     # 1) Stricter system prompt
@@ -86,7 +86,7 @@ def optimize_alt_tag_gpt4(
     user_prompt = (
         f"Please create a single, concise alt text.\n\n"
         f"Context:\n"
-        f"- BLIP caption of the image: '{caption}'\n" 
+        f"- BLIP caption of the image: '{caption}'\n"
         f"- Filename: '{img_name}'\n"
         f"- Target keywords: {', '.join(keywords)}\n"
         f"- Theme: {theme}\n"
@@ -107,7 +107,7 @@ def optimize_alt_tag_gpt4(
                 {"role": "user", "content": user_prompt}
             ],
             max_tokens=80,
-            temperature=0.5
+            temperature=gpt_temperature  # <-- Use user-selected creativity
         )
         alt_tag = response.choices[0].message.content.strip()
     except openai.error.OpenAIError as e:
@@ -131,7 +131,6 @@ def optimize_alt_tag_gpt4(
             break
         attempts += 1
 
-        # Stricter re-run prompt
         shortened_system_prompt = (
             "You must revise the alt text. It is either over 100 characters "
             "or missing required items. All keywords and the location MUST appear, "
@@ -151,7 +150,7 @@ def optimize_alt_tag_gpt4(
                     {"role": "user", "content": shortened_user_prompt}
                 ],
                 max_tokens=60,
-                temperature=0.5
+                temperature=gpt_temperature  # Keep same creativity in re-run
             )
             alt_tag = response.choices[0].message.content.strip()
         except openai.error.OpenAIError as e:
@@ -200,7 +199,6 @@ def export_image(
         )
         return None, None
 
-    # Map user choice to Pillow format
     format_mapping = {
         "PNG":  ("png",  "PNG"),
         "JPEG": ("jpg",  "JPEG"),
@@ -210,7 +208,6 @@ def export_image(
     extension, pillow_format = format_mapping[user_format_choice]
     filename = f"{alt_tag_cleaned}.{extension}"
 
-    # Save image to in-memory buffer
     img_bytes = io.BytesIO()
     try:
         image.save(img_bytes, format=pillow_format)
@@ -221,13 +218,11 @@ def export_image(
 
     return img_bytes, filename
 
-
 # ==============================
 #  Streamlit UI
 # ==============================
 st.title("🖼️ SEO Image Alt Tag Generator (BLIP + GPT-4)")
 
-# Session key for reloading the uploader
 if "upload_key" not in st.session_state:
     st.session_state["upload_key"] = 0
 
@@ -255,11 +250,19 @@ with st.expander("⚙️ Advanced Settings"):
     else:
         max_width_setting = None
 
-    # Let user pick output format
     user_format_choice = st.selectbox(
         "Output Format for Exported Images:",
         ["PNG", "JPEG", "WEBP", "AVIF"],
         index=0
+    )
+
+    # New: GPT Creativity
+    gpt_temperature = st.slider(
+        "GPT-4 Creativity (Temperature)",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.5,  # default
+        step=0.1
     )
 
 # Let user choose how to provide images
@@ -304,7 +307,6 @@ elif upload_mode == "Upload a .zip Folder of Images":
 if all_input_images:
     st.success(f"**Total Images Found**: {len(all_input_images)}")
 
-    # If we haven't stored BLIP captions in session yet, do so now
     if "blip_captions" not in st.session_state:
         st.session_state["blip_captions"] = {}
 
@@ -329,7 +331,6 @@ if all_input_images:
     theme_input = st.text_input("🎨 Theme of the photos:", "")
     location_input = st.text_input("📍 Location (for local SEO):", "")
 
-    # Single step: Generate & Download
     if st.button("🚀 Generate & Download Alt-Optimized Images"):
         if not keywords_input.strip() or not theme_input.strip() or not location_input.strip():
             st.warning("Please provide keywords, theme, and location to proceed.")
@@ -339,7 +340,7 @@ if all_input_images:
         theme = theme_input.strip()
         location = location_input.strip()
 
-        # Create an in-memory ZIP
+        # Create in-memory ZIP
         zip_buffer = io.BytesIO()
         zipf = zipfile.ZipFile(zip_buffer, "w")
 
@@ -365,7 +366,8 @@ if all_input_images:
                     keywords=keywords,
                     theme=theme,
                     location=location,
-                    img_name=img_name
+                    img_name=img_name,
+                    gpt_temperature=gpt_temperature  # <-- Pass user-selected temperature
                 )
 
             # Step C: Resize if needed
@@ -373,7 +375,7 @@ if all_input_images:
             if resize_option and max_width_setting:
                 pil_img = resize_image(pil_img, max_width_setting)
 
-            # Step D: Export the image with alt-tag-based filename
+            # Step D: Export the image
             img_bytes, exported_filename = export_image(pil_img, optimized_alt_tag, user_format_choice)
             if img_bytes is None or exported_filename is None:
                 continue
