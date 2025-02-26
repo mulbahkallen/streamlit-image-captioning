@@ -19,8 +19,8 @@ if not api_key or not api_key.startswith("sk-"):
     st.error("🔑 OpenAI API Key is missing or incorrect! Please update it in Streamlit Secrets.")
     st.stop()
 
-# Initialize OpenAI client
-openai_client = openai.OpenAI(api_key=api_key)
+# Initialize OpenAI
+openai.api_key = api_key
 
 # ==============================
 #  Helper / Utility Functions
@@ -42,11 +42,15 @@ def generate_caption_with_gpt4(image_bytes):
     Send image bytes to GPT-4 Turbo Vision and get a description.
     This is cached so repeated runs on the same image won't cost new tokens.
     """
+    # Convert the raw bytes into a PIL Image
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     img_base64 = encode_image_to_base64(image)
 
-    response = openai_client.chat.completions.create(
-        model="gpt-4-turbo",
+    # NOTE: GPT-4 image support is hypothetical here. This code
+    # shows the concept of sending an image, though real usage
+    # may differ. GPT-4 with Vision is not publicly available via standard API.
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
         messages=[
             {"role": "system", "content": "You are an AI image captioning assistant."},
             {
@@ -61,11 +65,43 @@ def generate_caption_with_gpt4(image_bytes):
     )
     return response.choices[0].message.content.strip()
 
+def re_run_shortening_gpt4(too_long_text, caption, keywords, theme, location):
+    """
+    If the alt tag is too long, run GPT-4 again with a stricter prompt:
+    - must be under 100 characters
+    - still retains essential SEO context
+    """
+    prompt = (
+        f"The following alt text is {len(too_long_text)} characters, but must be under 100 characters.\n"
+        f"Original alt text: '{too_long_text}'\n"
+        f"Please revise it to be strictly under 100 characters, while retaining the core SEO essence.\n\n"
+        f"Image caption: '{caption}'\n"
+        f"Target keywords: {', '.join(keywords)}\n"
+        f"Theme: {theme}\n"
+        f"Location: {location}\n\n"
+        f"Return ONLY the alt text under 100 characters, with no additional commentary."
+    )
+
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=100,
+        temperature=0.7
+    )
+    return response.choices[0].message.content.strip()
+
 @st.cache_data
 def optimize_alt_tag_gpt4(caption, keywords, theme, location):
     """
-    Generate an SEO-optimized alt tag using GPT-4 Turbo with best practices.
-    Cached to avoid repeated calls with identical inputs.
+    Generate an SEO-optimized alt tag using GPT-4 with best practices:
+    1. Keep it concise (under 100 characters).
+    2. Provide context relevant to the site's content.
+    3. Naturally include the keywords and location without stuffing.
+    4. Avoid "image of", "picture of", or similar phrases.
+    5. Provide clarity for visually impaired users.
+    
+    If the returned alt tag is still > 100 characters, automatically
+    re-run GPT-4 with a stricter prompt to get a shortened version.
     """
     prompt = (
         f"Image caption: '{caption}'.\n"
@@ -78,16 +114,24 @@ def optimize_alt_tag_gpt4(caption, keywords, theme, location):
         f"3️⃣ Naturally include the keywords and location without stuffing.\n"
         f"4️⃣ Avoid 'image of', 'picture of', or similar phrases.\n"
         f"5️⃣ Provide clarity for visually impaired users.\n\n"
-        f"Generate a final optimized alt tag now."
+        f"Return ONLY the final alt tag, nothing else."
     )
 
-    response = openai_client.chat.completions.create(
-        model="gpt-4-turbo",
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=100,
         temperature=0.7
     )
-    return response.choices[0].message.content.strip()
+    alt_tag = response.choices[0].message.content.strip()
+
+    # If GPT returns something still > 100 chars, re-run with a stricter prompt
+    for _ in range(3):  # Try up to 3 times if GPT doesn't obey
+        if len(alt_tag) <= 100:
+            break
+        alt_tag = re_run_shortening_gpt4(alt_tag, caption, keywords, theme, location)
+
+    return alt_tag
 
 def resize_image(image, max_width):
     """
@@ -102,26 +146,37 @@ def resize_image(image, max_width):
 def export_image(image, alt_tag, user_format_choice):
     """
     Save the image using the alt_tag for the filename (cleaned).
-    Respect the chosen output format (PNG, JPEG, WEBP, AVIF, etc.).
+    Respect the chosen output format (PNG, JPEG, WEBP, AVIF).
+    
+    Removes any stray quotes, ensures it is properly sanitized
+    for file naming. We do not truncate or remove words here;
+    the GPT function is responsible for ensuring the final alt
+    tag (and thus filename) is under 100 characters.
     """
+    # 1. Strip leading/trailing quotes, remove all quotes inside
+    alt_tag = alt_tag.strip('"').strip("'")
     alt_tag_cleaned = (
-        alt_tag.replace(" ", "_")
+        alt_tag.replace('"', "")
+               .replace("'", "")
+               .replace(" ", "_")
                .replace(",", "")
                .replace(".", "")
                .replace("/", "")
                .replace("\\", "")
     )
-    # Strip leading non-alphanumeric characters
+
+    # 2. Strip leading non-alphanumeric characters
     alt_tag_cleaned = re.sub(r'^[^a-zA-Z0-9]+', '', alt_tag_cleaned)
 
+    # 3. Final check if > 100 (it shouldn't be if GPT obeyed). But just in case:
     if len(alt_tag_cleaned) > 100:
         st.warning(
-            f"❌ Cannot save image because filename (derived from alt tag) exceeds "
-            f"100 characters:\n'{alt_tag_cleaned}'"
+            f"❌ Generated alt text exceeded 100 characters, after cleaning:\n'{alt_tag_cleaned}'\n"
+            "Please regenerate or manually shorten."
         )
         return None, None
 
-    # Map user choice to extension and Pillow format
+    # 4. Determine file extension and format
     format_mapping = {
         "PNG":  ("png",  "PNG"),
         "JPEG": ("jpg",  "JPEG"),
