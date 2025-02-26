@@ -2,4 +2,5 @@ streamlit
 torch
 transformers
 openai
-Pillow
+pillow>=9.0
+pillow-avif-plugin>=0.2.0
