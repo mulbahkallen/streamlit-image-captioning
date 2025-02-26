@@ -26,32 +26,29 @@ openai.api_key = api_key
 #  Helper / Utility Functions
 # ==============================
 
-def re_run_shortening_gpt4(
-    too_long_text: str,
-    caption: str,
+def generate_caption_with_gpt4(
+    image_bytes: bytes,
     keywords: list[str],
     theme: str,
-    location: str,
-    img_name: str
+    location: str
 ) -> str:
     """
-    If the alt text is too long (>100 chars), run GPT-4 again with a stricter prompt
-    to shorten it while retaining key context.
+    Generates a short placeholder caption by sending minimal context to GPT-4.
+    We'll include some context (keywords, theme, location) to produce a
+    more relevant placeholder than a purely generic line.
     """
-    system_prompt = "You are a helpful assistant that shortens alt text under strict constraints."
-    user_prompt = (
-        f"The following alt text is {len(too_long_text)} characters, but it must be under 100.\n"
-        f"Original alt text: '{too_long_text}'\n\n"
-        f"Please revise it to be strictly under 100 characters, while retaining the SEO essence.\n\n"
-        f"(Context)\n"
-        f"Caption: '{caption}'\n"
-        f"Target keywords: {', '.join(keywords)}\n"
-        f"Theme: {theme}\n"
-        f"Location: {location}\n"
-        f"Filename: {img_name}\n\n"
-        f"Return ONLY the shortened alt text under 100 characters."
+    system_prompt = (
+        "You are a helpful assistant that creates short, descriptive captions. "
+        "Captions should be under ~50 characters if possible."
     )
-
+    user_prompt = (
+        f"Please provide a short caption for an uploaded image.\n"
+        f"These are the relevant details (for possible context):\n"
+        f"- Theme: {theme}\n"
+        f"- Location: {location}\n"
+        f"- Keywords: {', '.join(keywords)}\n\n"
+        f"Return ONLY the caption, nothing else."
+    )
     try:
         response = openai.chat.completions.create(
             model="gpt-4",
@@ -59,33 +56,8 @@ def re_run_shortening_gpt4(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=100,
+            max_tokens=50,
             temperature=0.7
-        )
-        return response.choices[0].message.content.strip()
-    except openai.error.OpenAIError as e:
-        st.error(f"OpenAI API error: {e}")
-        # Fallback: just return the original
-        return too_long_text
-
-def generate_caption_with_gpt4(image_bytes: bytes) -> str:
-    """
-    Generates a brief, placeholder caption by sending minimal context to GPT-4.
-    (No real image analysis is actually performed.)
-    """
-    system_prompt = "You are a helpful assistant that creates short image descriptions."
-    user_prompt = (
-        f"Please provide a short, generic description for an uploaded image. "
-        f"Keep it under 50 characters, if possible."
-    )
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            max_tokens=50
         )
         return response.choices[0].message.content.strip()
     except openai.error.OpenAIError as e:
@@ -100,28 +72,41 @@ def optimize_alt_tag_gpt4(
     img_name: str
 ) -> str:
     """
-    Generate an SEO-optimized alt text using GPT-4 with best practices:
-      1) Under 100 characters
-      2) Provide relevant context
-      3) Include keywords & location
-      4) Avoid 'image of', 'picture of'
-      5) Clarity for visually impaired
-      6) Use minimal context for uniqueness
+    Improved version of the alt text generator:
+      - Must stay under 100 characters.
+      - Must include all keywords & location.
+      - Avoid phrases like 'image of'.
+      - Provide clarity for visually impaired.
+      - Re-run if missing any requirements.
     """
-    system_prompt = "You are a helpful SEO assistant creating concise alt text."
+
+    # 1) Stricter system prompt
+    system_prompt = (
+        "You are a strict SEO assistant. You must generate alt text that:\n"
+        " • Stays under 100 characters.\n"
+        " • Clearly references the subject.\n"
+        " • NATURALLY includes *all* provided keywords and the location.\n"
+        " • Omits 'image of' or 'picture of'.\n"
+        " • Is helpful to visually impaired users.\n"
+        "The alt text must not exceed 100 characters under any circumstances."
+    )
+
+    # 2) User prompt emphasizing mandatory elements
     user_prompt = (
-        f"Image caption: '{caption}'.\n"
-        f"Filename: '{img_name}'.\n"
-        f"Target keywords: {', '.join(keywords)}.\n"
-        f"Theme: {theme}.\n"
-        f"Location: {location}.\n\n"
-        f"Please generate an optimized alt text following these SEO best practices:\n"
-        f"1️⃣ Under 100 characters.\n"
-        f"2️⃣ Provide context relevant to the site's content.\n"
-        f"3️⃣ Naturally include the keywords and location.\n"
-        f"4️⃣ Avoid phrases like 'image of', 'picture of'.\n"
-        f"5️⃣ Provide clarity for visually impaired users.\n\n"
-        f"Return ONLY the final alt text."
+        f"Please create a single, concise alt text.\n\n"
+        f"Context:\n"
+        f"- Image caption: '{caption}'\n"
+        f"- Filename: '{img_name}'\n"
+        f"- Target keywords: {', '.join(keywords)}\n"
+        f"- Theme: {theme}\n"
+        f"- Location: {location}\n\n"
+        f"Mandatory Requirements:\n"
+        f"1. Must include every keyword from the target keywords.\n"
+        f"2. Must include the location.\n"
+        f"3. Must remain under 100 characters total.\n"
+        f"4. Avoid phrases like 'image of' or 'picture of'.\n"
+        f"5. If the caption is unhelpful, use best judgment for context.\n\n"
+        f"Return ONLY the final alt text. Do not add commentary."
     )
 
     try:
@@ -131,27 +116,57 @@ def optimize_alt_tag_gpt4(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=100,
-            temperature=0.7
+            max_tokens=80,      # limit tokens to avoid run-on answers
+            temperature=0.5     # lower temp for more deterministic results
         )
+        alt_tag = response.choices[0].message.content.strip()
     except openai.error.OpenAIError as e:
         st.error(f"OpenAI API error: {e}")
         return caption[:80] + "..."
 
-    alt_tag = response.choices[0].message.content.strip()
+    # Helper to check if all required keywords & location are included
+    def has_all_required_elements(text: str, kw_list: list[str], loc: str) -> bool:
+        txt_lower = text.lower()
+        for kw in kw_list:
+            if kw.lower() not in txt_lower:
+                return False
+        if loc.lower() not in txt_lower:
+            return False
+        return True
 
-    # Re-run up to 3 times if GPT doesn't respect the length
-    for _ in range(3):
-        if len(alt_tag) <= 100:
+    # Re-run if text is too long or missing mandatory elements
+    attempts = 0
+    while attempts < 3:
+        if len(alt_tag) <= 100 and has_all_required_elements(alt_tag, keywords, location):
             break
-        alt_tag = re_run_shortening_gpt4(
-            too_long_text=alt_tag,
-            caption=caption,
-            keywords=keywords,
-            theme=theme,
-            location=location,
-            img_name=img_name
+        attempts += 1
+
+        # Stricter re-run prompt
+        shortened_system_prompt = (
+            "You must revise the alt text. It is either over 100 characters "
+            "or missing required items. All keywords and the location MUST appear, "
+            "while staying under 100 characters total."
         )
+        shortened_user_prompt = (
+            f"Original attempt: '{alt_tag}'\n\n"
+            f"Required keywords: {keywords}\n"
+            f"Required location: {location}\n\n"
+            f"Return ONLY the new alt text under 100 chars."
+        )
+        try:
+            response = openai.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": shortened_system_prompt},
+                    {"role": "user", "content": shortened_user_prompt}
+                ],
+                max_tokens=60,
+                temperature=0.5
+            )
+            alt_tag = response.choices[0].message.content.strip()
+        except openai.error.OpenAIError as e:
+            st.error(f"OpenAI API error: {e}")
+            break
 
     return alt_tag
 
@@ -346,7 +361,12 @@ if all_input_images:
             # Step 1: Generate or retrieve short placeholder caption
             if img_name not in st.session_state["image_captions"]:
                 with st.spinner(f"Generating a short placeholder caption for {img_name}..."):
-                    st.session_state["image_captions"][img_name] = generate_caption_with_gpt4(img_bytes_data)
+                    st.session_state["image_captions"][img_name] = generate_caption_with_gpt4(
+                        img_bytes_data,
+                        keywords,
+                        theme,
+                        location
+                    )
 
             basic_caption = st.session_state["image_captions"][img_name]
 
