@@ -241,7 +241,7 @@ def export_image(
 # ==============================
 #  Streamlit UI
 # ==============================
-st.title("🖼️ SEO Image Alt Tag Generator (Attempting Real Image Analysis)")
+st.title("🖼️ SEO Image Alt Tag Generator")
 
 # Session key for reloading the uploader
 if "upload_key" not in st.session_state:
