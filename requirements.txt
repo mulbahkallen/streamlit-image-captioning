@@ -4,5 +4,4 @@ transformers
 openai
 pillow>=9.0
 accelerate
-pillow
 pillow_avif
