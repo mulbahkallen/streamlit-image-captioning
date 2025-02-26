@@ -1,14 +1,14 @@
 import streamlit as st
 import openai
 from PIL import Image
+import pillow_avif  # Registers AVIF support
 import io
 import base64
 import zipfile
 import os
 import csv
 import pandas as pd
-import re  # <-- NEW for regex
-import pillow_avif  # registers AVIF support
+import re  # For regex
 
 # ==============================
 #  Load OpenAI API Key
@@ -25,7 +25,6 @@ openai_client = openai.OpenAI(api_key=api_key)
 # ==============================
 #  Helper / Utility Functions
 # ==============================
-
 @st.cache_data
 def encode_image_to_base64(image):
     """
@@ -118,18 +117,16 @@ def export_image(image, alt_tag, output_format):
                .replace("\\", "")
     )
 
-    # ---------- NEW: Strip leading special characters ----------
+    # ---------- Strip leading special characters ----------
     alt_tag_cleaned = re.sub(r'^[^a-zA-Z0-9]+', '', alt_tag_cleaned)
-    # -----------------------------------------------------------
 
-    # ---------- NEW: Enforce 100-character limit ---------------
+    # ---------- Enforce 100-character limit ---------------
     if len(alt_tag_cleaned) > 100:
         st.warning(
             f"❌ Cannot save image because filename (derived from alt tag) exceeds "
             f"100 characters:\n'{alt_tag_cleaned}'"
         )
         return None, None
-    # -----------------------------------------------------------
 
     extension = "png" if output_format == "PNG" else "jpg"
     filename = f"{alt_tag_cleaned}.{extension}"
@@ -144,20 +141,27 @@ def export_image(image, alt_tag, output_format):
 # ==============================
 #  Streamlit UI
 # ==============================
-
 st.title("🖼️ SEO Image Alt Tag Generator")
 
-# --------- NEW: Reset Button -----------
+# 1. Initialize or update upload_key in session state if needed
+if "upload_key" not in st.session_state:
+    st.session_state["upload_key"] = 0
+
+# 2. Reset App Button
 if st.button("Reset App"):
-    st.session_state.clear()
-    #st.experimental_rerun()
-# ---------------------------------------
+    # Clear GPT-4 captions if you want to (optional)
+    if "image_captions" in st.session_state:
+        del st.session_state["image_captions"]
+    # Increment the key so we get a fresh uploader
+    st.session_state["upload_key"] += 1
+    # Note: We do NOT call st.experimental_rerun()
+    # Because a button press automatically triggers a rerun anyway.
 
 st.markdown("""
 **Welcome!**  
 1. Drag-and-drop individual images or multiple images.  
-2. Alternatively, upload a **.zip folder** of images (drag-and-drop) if you have a folder of images.  
-3. Provide your **keywords**, **theme**, and now **location** for local SEO.  
+2. Alternatively, upload a **.zip folder** of images if you have a folder of images.  
+3. Provide your **keywords**, **theme**, and **location** for local SEO.  
 4. Generate a GPT-4 caption (internally) and SEO-optimized alt tags.  
 5. Download a ZIP with renamed images **and** a CSV metadata file.
 """)
@@ -178,7 +182,7 @@ with st.expander("⚙️ Advanced Settings"):
         help="Choose the final file format (PNG or JPEG)."
     )
 
-# Let user choose whether they want to upload files or a zip folder
+# Let user choose how they want to provide images
 upload_mode = st.radio(
     "How would you like to provide images?",
     ["Upload Images", "Upload a .zip Folder of Images"]
@@ -190,8 +194,9 @@ all_input_images = []
 if upload_mode == "Upload Images":
     uploaded_files = st.file_uploader(
         "Drag and drop or select images",
-        type=["jpg", "jpeg", "png", "webp", "avif"],  # NEW: accept webp + avif
-        accept_multiple_files=True
+        type=["jpg", "jpeg", "png", "webp", "avif"],  # Accept AVIF if system has libs
+        accept_multiple_files=True,
+        key=f"uploader_{st.session_state.upload_key}"  # KEY IS DYNAMIC
     )
     if uploaded_files:
         for uf in uploaded_files:
@@ -202,7 +207,8 @@ elif upload_mode == "Upload a .zip Folder of Images":
     uploaded_zip = st.file_uploader(
         "Drag and drop or select a .zip file of images",
         type=["zip"],
-        accept_multiple_files=False
+        accept_multiple_files=False,
+        key=f"zip_uploader_{st.session_state.upload_key}"  # KEY IS DYNAMIC
     )
     if uploaded_zip:
         with zipfile.ZipFile(uploaded_zip, "r") as zip_ref:
@@ -210,11 +216,12 @@ elif upload_mode == "Upload a .zip Folder of Images":
                 if not file_info.is_dir():
                     # Only process files with valid image extensions
                     filename_lower = file_info.filename.lower()
-                    if filename_lower.endswith((".jpg", ".jpeg", ".png", ".webp", ".avif")):  # NEW
+                    if filename_lower.endswith((".jpg", ".jpeg", ".png", ".webp", ".avif")):
                         file_bytes = zip_ref.read(file_info.filename)
                         base_name = os.path.basename(file_info.filename)
                         all_input_images.append((base_name, file_bytes))
 
+# If we have images, proceed
 if all_input_images:
     st.success(f"**Total Images Found**: {len(all_input_images)}")
 
@@ -222,7 +229,7 @@ if all_input_images:
     if "image_captions" not in st.session_state:
         st.session_state.image_captions = {}
 
-    # Show the images in columns
+    # Display the images in columns
     col1, col2, col3 = st.columns(3)
     for idx, (img_name, img_bytes_data) in enumerate(all_input_images):
         image = Image.open(io.BytesIO(img_bytes_data)).convert("RGB")
@@ -239,6 +246,7 @@ if all_input_images:
     st.markdown("---")
     st.markdown("### Provide Keywords, Theme & Location")
     st.markdown("These help GPT-4 optimize the alt text for SEO, including **local SEO** context.")
+    
     keywords_input = st.text_input("🔑 Enter target keywords (comma-separated):", "")
     theme_input = st.text_input("🎨 Enter the theme of the photos:", "")
     location_input = st.text_input("📍 Enter location (for local SEO):", "")
@@ -258,10 +266,7 @@ if all_input_images:
 
         # Prepare CSV data (NO GPT-4 caption displayed)
         csv_data = [
-            ("Original Filename",
-             "Optimized Alt Text",
-             "Alt Text Length",
-             "Exported Filename")
+            ("Original Filename", "Optimized Alt Text", "Alt Text Length", "Exported Filename")
         ]
 
         for img_name, img_bytes_data in all_input_images:
@@ -276,14 +281,14 @@ if all_input_images:
             with st.spinner(f"Optimizing Alt Tag for {img_name}..."):
                 optimized_alt_tag = optimize_alt_tag_gpt4(basic_caption, keywords, theme, location)
 
-            # 3. Possibly resize
+            # 3. Possibly resize the image
             image = Image.open(io.BytesIO(img_bytes_data)).convert("RGB")
             if resize_option and max_width_setting:
                 image = resize_image(image, max_width_setting)
 
-            # 4. Export with alt-tag-based filename
+            # 4. Export image with alt-tag-based filename
             img_bytes, exported_filename = export_image(image, optimized_alt_tag, output_format)
-            
+
             # If export_image returned None, skip writing to zip & CSV
             if img_bytes is None or exported_filename is None:
                 continue
@@ -294,7 +299,7 @@ if all_input_images:
             alt_tag_length = len(optimized_alt_tag)
             csv_data.append((img_name, optimized_alt_tag, str(alt_tag_length), exported_filename))
 
-        # Close ZIP
+        # Close the zipfile
         zipf.close()
         zip_buffer.seek(0)
 
@@ -314,7 +319,6 @@ if all_input_images:
         writer = csv.writer(csv_buffer)
         for row in csv_data:
             writer.writerow(row)
-
         csv_bytes = csv_buffer.getvalue().encode("utf-8")
 
         # ---- Download CSV
@@ -325,9 +329,9 @@ if all_input_images:
             mime="text/csv"
         )
 
-        # ---- Display Summary Table (without GPT-4 caption)
+        # ---- Display Summary Table
         st.markdown("### Summary Table")
         headers = csv_data[0]
-        rows = csv_data[1:]  # all data except header
+        rows = csv_data[1:]  # all data except the header
         df = pd.DataFrame(rows, columns=headers)
         st.dataframe(df, use_container_width=True)
