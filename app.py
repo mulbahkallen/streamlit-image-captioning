@@ -1,7 +1,5 @@
 import streamlit as st
 import openai
-from openai.error import OpenAIError, RateLimitError  # <-- NEW IMPORTS
-
 from PIL import Image
 import pillow_heif  # Replaces pillow_avif
 pillow_heif.register_avif_opener()  # Enable AVIF read/write support
@@ -101,9 +99,6 @@ def optimize_alt_tag_gpt4(
         f"5. Return ONLY the final alt text (no commentary)."
     )
 
-    # ---------------------------------------------------------------
-    # FIRST TRY BLOCK
-    # ---------------------------------------------------------------
     try:
         response = openai.chat.completions.create(
             model="gpt-4",
@@ -112,14 +107,10 @@ def optimize_alt_tag_gpt4(
                 {"role": "user", "content": user_prompt}
             ],
             max_tokens=80,
-            temperature=gpt_temperature  # Use user-selected creativity
+            temperature=gpt_temperature  # <-- Use user-selected creativity
         )
         alt_tag = response.choices[0].message.content.strip()
-
-    except RateLimitError as e:  # <-- NEW: handle rate limit separately
-        st.error("You have exceeded your API quota or rate limit. Please check your OpenAI plan.")
-        return caption[:80] + "..."
-    except OpenAIError as e:     # <-- NEW: handle general OpenAI errors
+    except openai.error.OpenAIError as e:
         st.error(f"OpenAI API error: {e}")
         return caption[:80] + "..."
 
@@ -151,10 +142,6 @@ def optimize_alt_tag_gpt4(
             f"Required location: {location}\n\n"
             f"Return ONLY the new alt text under 100 chars."
         )
-
-        # ---------------------------------------------------------------
-        # SECOND TRY BLOCK (WITH RE-RUN)
-        # ---------------------------------------------------------------
         try:
             response = openai.chat.completions.create(
                 model="gpt-4",
@@ -166,16 +153,11 @@ def optimize_alt_tag_gpt4(
                 temperature=gpt_temperature  # Keep same creativity in re-run
             )
             alt_tag = response.choices[0].message.content.strip()
-
-        except RateLimitError as e:  # <-- NEW
-            st.error("You have exceeded your API quota or rate limit. Please check your OpenAI plan.")
-            break
-        except OpenAIError as e:     # <-- NEW
+        except openai.error.OpenAIError as e:
             st.error(f"OpenAI API error: {e}")
             break
 
     return alt_tag
-
 
 def resize_image(image: Image.Image, max_width: int) -> Image.Image:
     """If the image is wider than max_width, resize it (preserving aspect ratio)."""
@@ -385,7 +367,7 @@ if all_input_images:
                     theme=theme,
                     location=location,
                     img_name=img_name,
-                    gpt_temperature=gpt_temperature
+                    gpt_temperature=gpt_temperature  # <-- Pass user-selected temperature
                 )
 
             # Step C: Resize if needed
