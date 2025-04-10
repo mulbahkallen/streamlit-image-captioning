@@ -28,13 +28,22 @@ if not api_key or not api_key.startswith("sk-"):
 openai.api_key = api_key
 
 # ==============================
-#  Load BLIP Model (cached)
+#  Load BLIP Model (cached) -- Updated with Hugging Face Auth Token
 # ==============================
 @st.cache_resource
 def load_blip_model():
+    # Pull the HF token from your Streamlit secrets
+    hf_token = st.secrets.get("HUGGINGFACE_TOKEN")
+    if not hf_token:
+        st.error("🔑 Hugging Face token is missing! Please add HUGGINGFACE_TOKEN in Streamlit Secrets.")
+        st.stop()
+
     model_name = "Salesforce/blip-image-captioning-base"
-    processor = BlipProcessor.from_pretrained(model_name)
-    model = BlipForConditionalGeneration.from_pretrained(model_name)
+    
+    # Pass use_auth_token=hf_token to both from_pretrained calls
+    processor = BlipProcessor.from_pretrained(model_name, use_auth_token=hf_token)
+    model = BlipForConditionalGeneration.from_pretrained(model_name, use_auth_token=hf_token)
+
     return processor, model
 
 processor, blip_model = load_blip_model()
@@ -171,7 +180,7 @@ def export_image(
     image: Image.Image,
     alt_tag: str,
     user_format_choice: str
-) -> tuple[io.BytesIO, str] | tuple[None, None]:
+):
     """
     Save the image using the alt_tag for the filename (sanitized).
     Respect the chosen output format (PNG, JPEG, WEBP, AVIF).
