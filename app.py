@@ -1,8 +1,10 @@
 import streamlit as st
 import openai
 from PIL import Image
-import pillow_heif  # Replaces pillow_avif
-pillow_heif.register_heif_opener()  # Supports HEIF/AVIF in Pillow
+from pillow_heif import register_heif_opener
+import pillow_avif  # importing registers the AVIF plugin automatically
+
+register_heif_opener()
 
 import io
 import base64
