@@ -5,4 +5,5 @@ openai
 pillow>=9.0
 accelerate
 pillow-heif
+pillow-avif-plugin
 huggingface-hub
