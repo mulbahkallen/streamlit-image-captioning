@@ -2,7 +2,7 @@ import streamlit as st
 import openai
 from PIL import Image
 import pillow_heif  # Replaces pillow_avif
-pillow_heif.register_avif_opener()  # Enable AVIF read/write support
+pillow_heif.register_heif_opener()  # Supports HEIF/AVIF in Pillow
 
 import io
 import base64
