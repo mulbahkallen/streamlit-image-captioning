@@ -4,5 +4,5 @@ transformers
 openai
 pillow>=9.0
 accelerate
-pillow-heif
+pillow-heif≥ 1.0
 huggingface-hub
