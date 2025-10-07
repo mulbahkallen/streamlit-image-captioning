@@ -84,7 +84,7 @@ def optimize_alt_tag(
     gpt_temperature: float
 ) -> str:
     """
-    Generate optimized alt text under 100 chars including all keywords and location.
+    Generate optimized alt text under 125 chars including all keywords and location.
     """
 
     # -------------------------------
@@ -97,16 +97,16 @@ def optimize_alt_tag(
     keywords = [sanitize_text(k) for k in keywords]
 
     # -------------------------------
-    # Stricter System Prompt
+    # Stricter System Prompt (125-char limit)
     # -------------------------------
     system_prompt = (
         "You are a strict SEO assistant.\n"
         "Rules for alt text:\n"
-        "1. Must be **under 100 characters** (hard limit).\n"
+        "1. Must be **under 125 characters** (hard limit).\n"
         "2. Must include **all provided keywords** and the **location**.\n"
         "3. Must describe the subject naturally and clearly for visually impaired users.\n"
         "4. Do **NOT** use phrases like 'image of', 'photo of', or similar.\n"
-        "5. If you cannot meet all requirements in <100 chars, shorten wording aggressively.\n"
+        "5. If you cannot meet all requirements in <125 chars, shorten wording aggressively.\n"
         "6. Do not include explanations or notes — only return the alt text itself."
     )
 
@@ -119,7 +119,7 @@ def optimize_alt_tag(
         f"Keywords: {', '.join(keywords)}\n"
         f"Theme: {theme}\n"
         f"Location: {location}\n\n"
-        "Your task: Return a **single alt text string** under 100 characters that naturally "
+        "Your task: Return a **single alt text string** under 125 characters that naturally "
         "includes all the keywords and the location.\n"
         "Do not use filler like 'image of'. Return ONLY the alt text."
     )
@@ -135,19 +135,19 @@ def optimize_alt_tag(
                 {"role": "user", "content": user_prompt},
             ],
             temperature=gpt_temperature,
-            max_tokens=80
+            max_tokens=90
         )
         alt_tag = response.choices[0].message.content.strip()
     except Exception as e:
         st.error(f"OpenAI API error: {e}")
-        return (caption + " " + " ".join(keywords) + " " + location)[:100]
+        return (caption + " " + " ".join(keywords) + " " + location)[:125]
 
     # -------------------------------
     # Retry Loop
     # -------------------------------
     attempts = 0
     while attempts < 3:
-        if len(alt_tag) <= 100 and has_all_required_elements(alt_tag, keywords, location):
+        if len(alt_tag) <= 125 and has_all_required_elements(alt_tag, keywords, location):
             break  # Success
         attempts += 1
 
@@ -155,7 +155,7 @@ def optimize_alt_tag(
             f"Previous attempt: '{alt_tag}'\n"
             f"Required keywords: {', '.join(keywords)}\n"
             f"Required location: {location}\n\n"
-            "Revise the alt text so it is **under 100 characters** and includes all required terms. "
+            "Revise the alt text so it is **under 125 characters** and includes all required terms. "
             "Be concise and descriptive. Return ONLY the alt text."
         )
 
@@ -167,7 +167,7 @@ def optimize_alt_tag(
                     {"role": "user", "content": retry_prompt},
                 ],
                 temperature=gpt_temperature,
-                max_tokens=80
+                max_tokens=90
             )
             alt_tag = response.choices[0].message.content.strip()
         except Exception as e:
@@ -177,13 +177,13 @@ def optimize_alt_tag(
     # -------------------------------
     # Final Fallback
     # -------------------------------
-    if len(alt_tag) > 100 or not has_all_required_elements(alt_tag, keywords, location):
+    if len(alt_tag) > 125 or not has_all_required_elements(alt_tag, keywords, location):
         st.warning("⚠️ Used fallback alt text due to compliance issues.")
         # Debug info
         st.info(f"Debug → Generated: '{alt_tag}' | Length: {len(alt_tag)} | "
                 f"Missing: {[kw for kw in keywords if kw.lower() not in alt_tag.lower()]} | "
                 f"Location OK: {location.lower() in alt_tag.lower()}")
-        fallback = (caption + " " + " ".join(keywords) + " " + location)[:100]
+        fallback = (caption + " " + " ".join(keywords) + " " + location)[:125]
         return fallback
 
     return alt_tag
