@@ -82,11 +82,12 @@ def optimize_alt_tag(
     location: str,
     img_name: str,
     gpt_temperature: float,
-    additional_context: str = ""
+    additional_context: str = "",
+    max_alt_length: int = 125
 ) -> str:
     """
-    Generate optimized alt text under 125 chars including all keywords, location,
-    and optional user-provided context.
+    Generate optimized alt text under user-defined length (125 or 150 chars)
+    including all keywords, location, and optional user-provided context.
     """
 
     # -------------------------------
@@ -100,18 +101,18 @@ def optimize_alt_tag(
     keywords = [sanitize_text(k) for k in keywords]
 
     # -------------------------------
-    # Stricter System Prompt
+    # System Prompt
     # -------------------------------
     system_prompt = (
-        "You are a strict SEO assistant.\n"
-        "Rules for alt text:\n"
-        "1. Must be **under 125 characters** (hard limit).\n"
-        "2. Must include **all provided keywords** and the **location**.\n"
-        "3. Use the additional context (if provided) to ensure accuracy.\n"
-        "4. Must describe the subject naturally and clearly for visually impaired users.\n"
-        "5. Do **NOT** use phrases like 'image of', 'photo of', or similar.\n"
-        "6. If you cannot meet all requirements in <125 chars, shorten wording aggressively.\n"
-        "7. Do not include explanations or notes — only return the alt text itself."
+        f"You are a strict SEO assistant.\n"
+        f"Rules for alt text:\n"
+        f"1. Must be **under {max_alt_length} characters** (hard limit).\n"
+        f"2. Must include **all provided keywords** and the **location**.\n"
+        f"3. Use the additional context (if provided) to ensure accuracy.\n"
+        f"4. Must describe the subject naturally and clearly for visually impaired users.\n"
+        f"5. Do **NOT** use phrases like 'image of', 'photo of', or similar.\n"
+        f"6. If you cannot meet all requirements in <{max_alt_length} chars, shorten wording aggressively.\n"
+        f"7. Do not include explanations or notes — only return the alt text itself."
     )
 
     # -------------------------------
@@ -124,9 +125,8 @@ def optimize_alt_tag(
         f"Theme: {theme}\n"
         f"Location: {location}\n"
         f"Additional Context (if any): {additional_context}\n\n"
-        "Your task: Return a **single alt text string** under 125 characters that naturally "
-        "includes all the keywords and the location, and uses the additional context if it "
-        "improves accuracy.\n"
+        f"Your task: Return a **single alt text string** under {max_alt_length} characters "
+        "that naturally includes all the keywords and the location, and uses the additional context if it improves accuracy.\n"
         "Do not use filler like 'image of'. Return ONLY the alt text."
     )
 
@@ -146,14 +146,14 @@ def optimize_alt_tag(
         alt_tag = response.choices[0].message.content.strip()
     except Exception as e:
         st.error(f"OpenAI API error: {e}")
-        return (caption + " " + " ".join(keywords) + " " + location)[:125]
+        return (caption + " " + " ".join(keywords) + " " + location)[:max_alt_length]
 
     # -------------------------------
     # Retry Loop
     # -------------------------------
     attempts = 0
     while attempts < 3:
-        if len(alt_tag) <= 125 and has_all_required_elements(alt_tag, keywords, location):
+        if len(alt_tag) <= max_alt_length and has_all_required_elements(alt_tag, keywords, location):
             break
         attempts += 1
 
@@ -162,8 +162,9 @@ def optimize_alt_tag(
             f"Required keywords: {', '.join(keywords)}\n"
             f"Required location: {location}\n"
             f"Additional context: {additional_context}\n\n"
-            "Revise the alt text so it is **under 125 characters**, includes all required terms, "
-            "and leverages context if provided. Be concise and descriptive. Return ONLY the alt text."
+            f"Revise the alt text so it is **under {max_alt_length} characters**, "
+            "includes all required terms, and leverages context if provided. "
+            "Be concise and descriptive. Return ONLY the alt text."
         )
 
         try:
@@ -184,12 +185,12 @@ def optimize_alt_tag(
     # -------------------------------
     # Final Fallback
     # -------------------------------
-    if len(alt_tag) > 125 or not has_all_required_elements(alt_tag, keywords, location):
+    if len(alt_tag) > max_alt_length or not has_all_required_elements(alt_tag, keywords, location):
         st.warning("⚠️ Used fallback alt text due to compliance issues.")
         st.info(f"Debug → Generated: '{alt_tag}' | Length: {len(alt_tag)} | "
                 f"Missing: {[kw for kw in keywords if kw.lower() not in alt_tag.lower()]} | "
                 f"Location OK: {location.lower() in alt_tag.lower()}")
-        fallback = (caption + " " + additional_context + " " + " ".join(keywords) + " " + location)[:125]
+        fallback = (caption + " " + additional_context + " " + " ".join(keywords) + " " + location)[:max_alt_length]
         return fallback
 
     return alt_tag
@@ -203,11 +204,11 @@ def resize_image(image: Image.Image, max_width: int) -> Image.Image:
         image = image.resize((max_width, new_height), Image.Resampling.LANCZOS)
     return image
 
-def export_image(image: Image.Image, alt_tag: str, user_format_choice: str):
+def export_image(image: Image.Image, alt_tag: str, user_format_choice: str, max_alt_length: int):
     """Save the image with sanitized alt_tag as filename."""
     alt_tag_cleaned = sanitize_text(alt_tag).replace(" ", "_")
-    if len(alt_tag_cleaned) > 125:
-        st.warning("❌ Generated alt text exceeded 125 characters after cleaning.")
+    if len(alt_tag_cleaned) > max_alt_length:
+        st.warning(f"❌ Generated alt text exceeded {max_alt_length} characters after cleaning.")
         return None, None
 
     format_mapping = {
@@ -270,6 +271,9 @@ with st.expander("⚙️ Advanced Settings"):
         value=0.5,
         step=0.1
     )
+
+    allow_long_alt = st.checkbox("Allow longer alt text (up to 150 characters)", value=False)
+    max_alt_length = 150 if allow_long_alt else 125
 
 # Upload mode
 upload_mode = st.radio("Select upload method:", ["Upload Images", "Upload a .zip Folder of Images"])
@@ -358,14 +362,15 @@ if all_input_images:
                 location=location,
                 img_name=img_name,
                 gpt_temperature=gpt_temperature,
-                additional_context=additional_context
+                additional_context=additional_context,
+                max_alt_length=max_alt_length
             )
 
             pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
             if resize_option and max_width_setting:
                 pil_img = resize_image(pil_img, max_width_setting)
 
-            img_bytes_out, exported_filename = export_image(pil_img, optimized_alt_tag, user_format_choice)
+            img_bytes_out, exported_filename = export_image(pil_img, optimized_alt_tag, user_format_choice, max_alt_length)
             if img_bytes_out is None:
                 continue
 
