@@ -86,42 +86,53 @@ def optimize_alt_tag(
     """
     Generate optimized alt text under 100 chars including all keywords and location.
     """
+
+    # -------------------------------
     # Sanitize inputs
+    # -------------------------------
     caption = sanitize_text(caption)
     theme = sanitize_text(theme)
     location = sanitize_text(location)
     img_name = sanitize_text(img_name)
     keywords = [sanitize_text(k) for k in keywords]
 
+    # -------------------------------
+    # Stricter System Prompt
+    # -------------------------------
     system_prompt = (
-        "You are a strict SEO assistant. You must generate alt text that:\n"
-        "• Stays under 100 characters.\n"
-        "• Clearly references the subject.\n"
-        "• NATURALLY includes all provided keywords and the location.\n"
-        "• Omits 'image of' or 'picture of'.\n"
-        "• Is useful for visually impaired users.\n"
-        "• Return only the final alt text."
+        "You are a strict SEO assistant.\n"
+        "Rules for alt text:\n"
+        "1. Must be **under 100 characters** (hard limit).\n"
+        "2. Must include **all provided keywords** and the **location**.\n"
+        "3. Must describe the subject naturally and clearly for visually impaired users.\n"
+        "4. Do **NOT** use phrases like 'image of', 'photo of', or similar.\n"
+        "5. If you cannot meet all requirements in <100 chars, shorten wording aggressively.\n"
+        "6. Do not include explanations or notes — only return the alt text itself."
     )
 
+    # -------------------------------
+    # User Prompt
+    # -------------------------------
     user_prompt = (
         f"BLIP caption: '{caption}'\n"
         f"Filename: '{img_name}'\n"
         f"Keywords: {', '.join(keywords)}\n"
         f"Theme: {theme}\n"
         f"Location: {location}\n\n"
-        "Requirements:\n"
-        "1. Include all keywords and the location.\n"
-        "2. Stay under 100 characters.\n"
-        "3. Avoid 'image of' or similar phrases.\n"
-        "4. Return ONLY the final alt text."
+        "Your task: Return a **single alt text string** under 100 characters that naturally "
+        "includes all the keywords and the location.\n"
+        "Do not use filler like 'image of'. Return ONLY the alt text."
     )
 
+    # -------------------------------
+    # First Attempt
+    # -------------------------------
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",     # switch to "gpt-5" if you have access
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
+                {"role": "user", "content": user_prompt},
             ],
             temperature=gpt_temperature,
             max_tokens=80
@@ -129,29 +140,31 @@ def optimize_alt_tag(
         alt_tag = response.choices[0].message.content.strip()
     except Exception as e:
         st.error(f"OpenAI API error: {e}")
-        return caption[:80] + "..."
+        return (caption + " " + " ".join(keywords) + " " + location)[:100]
 
-    # Retry loop
+    # -------------------------------
+    # Retry Loop
+    # -------------------------------
     attempts = 0
     while attempts < 3:
         if len(alt_tag) <= 100 and has_all_required_elements(alt_tag, keywords, location):
-            break
-
+            break  # Success
         attempts += 1
+
         retry_prompt = (
-            f"Previous alt text: '{alt_tag}'\n"
-            f"Required keywords: {keywords}\n"
-            f"Required location: {location}\n"
-            "Revise to meet all requirements while staying under 100 characters.\n"
-            "Return ONLY the new alt text."
+            f"Previous attempt: '{alt_tag}'\n"
+            f"Required keywords: {', '.join(keywords)}\n"
+            f"Required location: {location}\n\n"
+            "Revise the alt text so it is **under 100 characters** and includes all required terms. "
+            "Be concise and descriptive. Return ONLY the alt text."
         )
 
         try:
             response = client.chat.completions.create(
-                model="gpt-4o",   # switch to "gpt-5" if desired
+                model="gpt-4o",
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": retry_prompt}
+                    {"role": "user", "content": retry_prompt},
                 ],
                 temperature=gpt_temperature,
                 max_tokens=80
@@ -161,13 +174,20 @@ def optimize_alt_tag(
             st.error(f"Retry failed: {e}")
             break
 
-    # Final fallback
+    # -------------------------------
+    # Final Fallback
+    # -------------------------------
     if len(alt_tag) > 100 or not has_all_required_elements(alt_tag, keywords, location):
-        fallback = (caption + " " + " ".join(keywords) + " " + location)[:100]
         st.warning("⚠️ Used fallback alt text due to compliance issues.")
+        # Debug info
+        st.info(f"Debug → Generated: '{alt_tag}' | Length: {len(alt_tag)} | "
+                f"Missing: {[kw for kw in keywords if kw.lower() not in alt_tag.lower()]} | "
+                f"Location OK: {location.lower() in alt_tag.lower()}")
+        fallback = (caption + " " + " ".join(keywords) + " " + location)[:100]
         return fallback
 
     return alt_tag
+
 
 def resize_image(image: Image.Image, max_width: int) -> Image.Image:
     """Resize image while maintaining aspect ratio."""
