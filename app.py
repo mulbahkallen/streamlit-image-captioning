@@ -3,12 +3,11 @@ import io
 import os
 import re
 import csv
-import base64
 import zipfile
 import pandas as pd
 from PIL import Image
 from pillow_heif import register_heif_opener
-import pillow_avif  # registers AVIF plugin
+import pillow_avif   # registers AVIF plugin
 import torch
 from transformers import BlipProcessor, BlipForConditionalGeneration
 from openai import OpenAI
@@ -51,15 +50,11 @@ processor, blip_model = load_blip_model()
 # Helper Functions
 # ==================================================
 def sanitize_text(text: str) -> str:
-    """
-    Remove potentially dangerous characters to avoid prompt injection and filename issues.
-    """
+    """Remove potentially dangerous characters to avoid prompt injection and filename issues."""
     return re.sub(r"[^\w\s.,'’\-]", "", text)
 
 def blip_generate_caption(image: Image.Image) -> str:
-    """
-    Generate a descriptive caption using BLIP with improved settings.
-    """
+    """Generate a descriptive caption using BLIP with improved settings."""
     inputs = processor(image, return_tensors="pt")
     with torch.no_grad():
         output = blip_model.generate(
@@ -121,10 +116,9 @@ def optimize_alt_tag(
         "4. Return ONLY the final alt text."
     )
 
-    # Generate initial alt text
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o",     # switch to "gpt-5" if you have access
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -154,7 +148,7 @@ def optimize_alt_tag(
 
         try:
             response = client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o",   # switch to "gpt-5" if desired
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": retry_prompt}
@@ -167,7 +161,7 @@ def optimize_alt_tag(
             st.error(f"Retry failed: {e}")
             break
 
-    # Final fallback if still non-compliant
+    # Final fallback
     if len(alt_tag) > 100 or not has_all_required_elements(alt_tag, keywords, location):
         fallback = (caption + " " + " ".join(keywords) + " " + location)[:100]
         st.warning("⚠️ Used fallback alt text due to compliance issues.")
@@ -184,9 +178,7 @@ def resize_image(image: Image.Image, max_width: int) -> Image.Image:
     return image
 
 def export_image(image: Image.Image, alt_tag: str, user_format_choice: str):
-    """
-    Save the image with sanitized alt_tag as filename.
-    """
+    """Save the image with sanitized alt_tag as filename."""
     alt_tag_cleaned = sanitize_text(alt_tag).replace(" ", "_")
     if len(alt_tag_cleaned) > 100:
         st.warning("❌ Generated alt text exceeded 100 characters after cleaning.")
@@ -214,7 +206,7 @@ def export_image(image: Image.Image, alt_tag: str, user_format_choice: str):
 # ==================================================
 # Streamlit UI
 # ==================================================
-st.title("🖼️ SEO Image Alt Tag Generator (BLIP + GPT-4o)")
+st.title("🖼️ SEO Image Alt Tag Generator (BLIP + GPT-4o/GPT-5)")
 
 if "upload_key" not in st.session_state:
     st.session_state["upload_key"] = 0
@@ -227,7 +219,7 @@ st.markdown("""
 **Welcome!**  
 1. Upload images or a **.zip folder** of images.  
 2. Provide **keywords**, **theme**, and **location**.  
-3. BLIP generates captions; GPT-4o optimizes them into alt text.  
+3. BLIP generates captions; GPT optimizes them into alt text.  
 4. Download a ZIP of renamed images and a CSV metadata file.
 """)
 
@@ -246,7 +238,7 @@ with st.expander("⚙️ Advanced Settings"):
     )
 
     gpt_temperature = st.slider(
-        "GPT-4o Creativity (Temperature)",
+        "GPT Creativity (Temperature)",
         min_value=0.0,
         max_value=1.0,
         value=0.5,
@@ -280,12 +272,18 @@ elif upload_mode == "Upload a .zip Folder of Images":
                     base_name = os.path.basename(file_info.filename)
                     all_input_images.append((base_name, zip_ref.read(file_info.filename)))
 
-# Display images
+# ==================================================
+# 🟢 Recommended Patch: Safe Threaded Captioning
+# ==================================================
 if all_input_images:
     st.success(f"**Total Images Found:** {len(all_input_images)}")
 
+    # Ensure key exists
     if "blip_captions" not in st.session_state:
         st.session_state["blip_captions"] = {}
+
+    # Use a local cache for thread safety
+    captions_cache = st.session_state["blip_captions"]
 
     st.markdown("#### Uploaded Images")
     cols = st.columns(3)
@@ -308,17 +306,19 @@ if all_input_images:
         theme = theme_input.strip()
         location = location_input.strip()
 
-        # Parallel caption generation
         def process_caption(name, data):
-            if name not in st.session_state["blip_captions"]:
+            if name not in captions_cache:
                 pil_img = Image.open(io.BytesIO(data)).convert("RGB")
                 return name, blip_generate_caption(pil_img)
-            return name, st.session_state["blip_captions"][name]
+            return name, captions_cache[name]
 
+        # Run BLIP captioning in parallel
         with ThreadPoolExecutor(max_workers=4) as executor:
             results = list(executor.map(lambda x: process_caption(*x), all_input_images))
+
+        # Update session state with results
         for name, caption in results:
-            st.session_state["blip_captions"][name] = caption
+            captions_cache[name] = caption
 
         # Prepare zip and csv
         zip_buffer = io.BytesIO()
@@ -326,7 +326,7 @@ if all_input_images:
         csv_data = [("Original Filename", "BLIP Caption", "Optimized Alt Text", "Alt Text Length", "Exported Filename")]
 
         for img_name, img_bytes in all_input_images:
-            blip_caption = st.session_state["blip_captions"][img_name]
+            blip_caption = captions_cache[img_name]
 
             optimized_alt_tag = optimize_alt_tag(
                 caption=blip_caption,
