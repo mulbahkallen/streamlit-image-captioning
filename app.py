@@ -1,48 +1,45 @@
 import streamlit as st
-import openai
-from PIL import Image
-from pillow_heif import register_heif_opener
-import pillow_avif  # importing registers the AVIF plugin automatically
-
-register_heif_opener()
-
 import io
+import os
+import re
+import csv
 import base64
 import zipfile
-import os
-import csv
 import pandas as pd
-import re
-
+from PIL import Image
+from pillow_heif import register_heif_opener
+import pillow_avif  # registers AVIF plugin
 import torch
 from transformers import BlipProcessor, BlipForConditionalGeneration
+from openai import OpenAI
+from concurrent.futures import ThreadPoolExecutor
+
+# ==================================================
+# Init
+# ==================================================
+register_heif_opener()
 
 # ==============================
-#  Load OpenAI API Key
+#  Load API Keys
 # ==============================
 api_key = st.secrets.get("OPENAI_API_KEY")
-
 if not api_key or not api_key.startswith("sk-"):
     st.error("🔑 OpenAI API Key is missing or incorrect! Please update it in Streamlit Secrets.")
     st.stop()
 
-# Initialize OpenAI
-openai.api_key = api_key
+client = OpenAI(api_key=api_key)
 
 # ==============================
-#  Load BLIP Model (cached) -- Updated with Hugging Face Auth Token
+#  Load BLIP Model
 # ==============================
 @st.cache_resource
 def load_blip_model():
-    # Pull the HF token from your Streamlit secrets
     hf_token = st.secrets.get("HUGGINGFACE_TOKEN")
     if not hf_token:
         st.error("🔑 Hugging Face token is missing! Please add HUGGINGFACE_TOKEN in Streamlit Secrets.")
         st.stop()
 
-    model_name = "Salesforce/blip-image-captioning-base"
-    
-    # Pass use_auth_token=hf_token to both from_pretrained calls
+    model_name = "Salesforce/blip-image-captioning-large"
     processor = BlipProcessor.from_pretrained(model_name, use_auth_token=hf_token)
     model = BlipForConditionalGeneration.from_pretrained(model_name, use_auth_token=hf_token)
 
@@ -50,21 +47,40 @@ def load_blip_model():
 
 processor, blip_model = load_blip_model()
 
+# ==================================================
+# Helper Functions
+# ==================================================
+def sanitize_text(text: str) -> str:
+    """
+    Remove potentially dangerous characters to avoid prompt injection and filename issues.
+    """
+    return re.sub(r"[^\w\s.,'’\-]", "", text)
+
 def blip_generate_caption(image: Image.Image) -> str:
     """
-    Uses BLIP to generate an actual descriptive caption for the image.
+    Generate a descriptive caption using BLIP with improved settings.
     """
     inputs = processor(image, return_tensors="pt")
     with torch.no_grad():
-        output = blip_model.generate(**inputs, max_new_tokens=50)
+        output = blip_model.generate(
+            **inputs,
+            max_new_tokens=64,
+            num_beams=3,
+            length_penalty=1.0
+        )
     caption = processor.decode(output[0], skip_special_tokens=True)
     return caption.strip()
 
-# ==============================
-#  Helper / Utility Functions
-# ==============================
+def has_all_required_elements(text: str, kw_list: list[str], loc: str) -> bool:
+    txt_lower = text.lower()
+    for kw in kw_list:
+        if kw.lower() not in txt_lower:
+            return False
+    if loc.lower() not in txt_lower:
+        return False
+    return True
 
-def optimize_alt_tag_gpt4(
+def optimize_alt_tag(
     caption: str,
     keywords: list[str],
     theme: str,
@@ -73,141 +89,107 @@ def optimize_alt_tag_gpt4(
     gpt_temperature: float
 ) -> str:
     """
-    Improved version of the alt text generator:
-      - Must stay under 100 characters.
-      - Must include all keywords & location.
-      - Avoid phrases like 'image of'.
-      - Provide clarity for visually impaired.
-      - Re-run if missing any requirements.
-      - Uses user-selected GPT temperature for "creativity".
+    Generate optimized alt text under 100 chars including all keywords and location.
     """
+    # Sanitize inputs
+    caption = sanitize_text(caption)
+    theme = sanitize_text(theme)
+    location = sanitize_text(location)
+    img_name = sanitize_text(img_name)
+    keywords = [sanitize_text(k) for k in keywords]
 
-    # 1) Stricter system prompt
     system_prompt = (
         "You are a strict SEO assistant. You must generate alt text that:\n"
-        " • Stays under 100 characters.\n"
-        " • Clearly references the subject.\n"
-        " • NATURALLY includes *all* provided keywords and the location.\n"
-        " • Omits 'image of' or 'picture of'.\n"
-        " • Is helpful to visually impaired users.\n"
-        "The alt text must not exceed 100 characters under any circumstances."
+        "• Stays under 100 characters.\n"
+        "• Clearly references the subject.\n"
+        "• NATURALLY includes all provided keywords and the location.\n"
+        "• Omits 'image of' or 'picture of'.\n"
+        "• Is useful for visually impaired users.\n"
+        "• Return only the final alt text."
     )
 
-    # 2) User prompt emphasizing mandatory elements
     user_prompt = (
-        f"Please create a single, concise alt text.\n\n"
-        f"Context:\n"
-        f"- BLIP caption of the image: '{caption}'\n"
-        f"- Filename: '{img_name}'\n"
-        f"- Target keywords: {', '.join(keywords)}\n"
-        f"- Theme: {theme}\n"
-        f"- Location: {location}\n\n"
-        f"Mandatory Requirements:\n"
-        f"1. Must include every keyword from the target keywords.\n"
-        f"2. Must include the location.\n"
-        f"3. Must remain under 100 characters total.\n"
-        f"4. Avoid phrases like 'image of' or 'picture of'.\n"
-        f"5. Return ONLY the final alt text (no commentary)."
+        f"BLIP caption: '{caption}'\n"
+        f"Filename: '{img_name}'\n"
+        f"Keywords: {', '.join(keywords)}\n"
+        f"Theme: {theme}\n"
+        f"Location: {location}\n\n"
+        "Requirements:\n"
+        "1. Include all keywords and the location.\n"
+        "2. Stay under 100 characters.\n"
+        "3. Avoid 'image of' or similar phrases.\n"
+        "4. Return ONLY the final alt text."
     )
 
+    # Generate initial alt text
     try:
-        response = openai.chat.completions.create(
-            model="gpt-4",
+        response = client.chat.completions.create(
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=80,
-            temperature=gpt_temperature  # <-- Use user-selected creativity
+            temperature=gpt_temperature,
+            max_tokens=80
         )
         alt_tag = response.choices[0].message.content.strip()
-    except openai.error.OpenAIError as e:
+    except Exception as e:
         st.error(f"OpenAI API error: {e}")
         return caption[:80] + "..."
 
-    # Helper to check if all required keywords & location are included
-    def has_all_required_elements(text: str, kw_list: list[str], loc: str) -> bool:
-        txt_lower = text.lower()
-        for kw in kw_list:
-            if kw.lower() not in txt_lower:
-                return False
-        if loc.lower() not in txt_lower:
-            return False
-        return True
-
-    # Re-run if text is too long or missing mandatory elements
+    # Retry loop
     attempts = 0
     while attempts < 3:
         if len(alt_tag) <= 100 and has_all_required_elements(alt_tag, keywords, location):
             break
-        attempts += 1
 
-        shortened_system_prompt = (
-            "You must revise the alt text. It is either over 100 characters "
-            "or missing required items. All keywords and the location MUST appear, "
-            "while staying under 100 characters total."
-        )
-        shortened_user_prompt = (
-            f"Original attempt: '{alt_tag}'\n\n"
+        attempts += 1
+        retry_prompt = (
+            f"Previous alt text: '{alt_tag}'\n"
             f"Required keywords: {keywords}\n"
-            f"Required location: {location}\n\n"
-            f"Return ONLY the new alt text under 100 chars."
+            f"Required location: {location}\n"
+            "Revise to meet all requirements while staying under 100 characters.\n"
+            "Return ONLY the new alt text."
         )
+
         try:
-            response = openai.chat.completions.create(
-                model="gpt-4",
+            response = client.chat.completions.create(
+                model="gpt-4o",
                 messages=[
-                    {"role": "system", "content": shortened_system_prompt},
-                    {"role": "user", "content": shortened_user_prompt}
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": retry_prompt}
                 ],
-                max_tokens=60,
-                temperature=gpt_temperature  # Keep same creativity in re-run
+                temperature=gpt_temperature,
+                max_tokens=80
             )
             alt_tag = response.choices[0].message.content.strip()
-        except openai.error.OpenAIError as e:
-            st.error(f"OpenAI API error: {e}")
+        except Exception as e:
+            st.error(f"Retry failed: {e}")
             break
+
+    # Final fallback if still non-compliant
+    if len(alt_tag) > 100 or not has_all_required_elements(alt_tag, keywords, location):
+        fallback = (caption + " " + " ".join(keywords) + " " + location)[:100]
+        st.warning("⚠️ Used fallback alt text due to compliance issues.")
+        return fallback
 
     return alt_tag
 
 def resize_image(image: Image.Image, max_width: int) -> Image.Image:
-    """If the image is wider than max_width, resize it (preserving aspect ratio)."""
+    """Resize image while maintaining aspect ratio."""
     if image.width > max_width:
         ratio = max_width / float(image.width)
         new_height = int(ratio * float(image.height))
-        image = image.resize((max_width, new_height), Image.ANTIALIAS)
+        image = image.resize((max_width, new_height), Image.Resampling.LANCZOS)
     return image
 
-def export_image(
-    image: Image.Image,
-    alt_tag: str,
-    user_format_choice: str
-):
+def export_image(image: Image.Image, alt_tag: str, user_format_choice: str):
     """
-    Save the image using the alt_tag for the filename (sanitized).
-    Respect the chosen output format (PNG, JPEG, WEBP, AVIF).
-    Return (img_bytes, filename) or (None, None) on failure.
+    Save the image with sanitized alt_tag as filename.
     """
-    # Clean alt_tag for filename
-    alt_tag_cleaned = (
-        alt_tag.strip()
-              .replace('"', "")
-              .replace("'", "")
-              .replace(" ", "_")
-              .replace(",", "")
-              .replace(".", "")
-              .replace("/", "")
-              .replace("\\", "")
-    )
-    # Remove leading non-alphanumeric
-    alt_tag_cleaned = re.sub(r'^[^a-zA-Z0-9]+', '', alt_tag_cleaned)
-
-    # Ensure <= 100 chars
+    alt_tag_cleaned = sanitize_text(alt_tag).replace(" ", "_")
     if len(alt_tag_cleaned) > 100:
-        st.warning(
-            f"❌ Generated alt text exceeded 100 characters after cleaning:\n"
-            f"'{alt_tag_cleaned}'\nPlease regenerate or manually shorten."
-        )
+        st.warning("❌ Generated alt text exceeded 100 characters after cleaning.")
         return None, None
 
     format_mapping = {
@@ -223,38 +205,34 @@ def export_image(
     try:
         image.save(img_bytes, format=pillow_format)
         img_bytes.seek(0)
-    except ValueError as e:
+    except Exception as e:
         st.error(f"Image save error: {e}")
         return None, None
 
     return img_bytes, filename
 
-# ==============================
-#  Streamlit UI
-# ==============================
-st.title("🖼️ SEO Image Alt Tag Generator (BLIP + GPT-4)")
+# ==================================================
+# Streamlit UI
+# ==================================================
+st.title("🖼️ SEO Image Alt Tag Generator (BLIP + GPT-4o)")
 
 if "upload_key" not in st.session_state:
     st.session_state["upload_key"] = 0
 
-# Reset App Button
 if st.button("Reset App"):
-    if "blip_captions" in st.session_state:
-        del st.session_state["blip_captions"]
+    st.session_state.pop("blip_captions", None)
     st.session_state["upload_key"] += 1
 
 st.markdown("""
 **Welcome!**  
-1. Upload or drag-and-drop images (individual or multiple).  
-2. Alternatively, upload a **.zip folder** of images.  
-3. Provide your **keywords**, **theme**, and **location** for local SEO.  
-4. A BLIP model will first describe your image. Then GPT-4 will generate a final alt tag.  
-5. Download a ZIP with renamed images **and** a CSV file for metadata.
+1. Upload images or a **.zip folder** of images.  
+2. Provide **keywords**, **theme**, and **location**.  
+3. BLIP generates captions; GPT-4o optimizes them into alt text.  
+4. Download a ZIP of renamed images and a CSV metadata file.
 """)
 
-# --- Advanced Settings ---
+# Advanced settings
 with st.expander("⚙️ Advanced Settings"):
-    st.markdown("**Resize Images** (to unify widths) and choose **Output Format**.")
     resize_option = st.checkbox("Resize images before export?")
     if resize_option:
         max_width_setting = st.slider("Max Width (px):", 100, 2000, 800, 50)
@@ -262,29 +240,23 @@ with st.expander("⚙️ Advanced Settings"):
         max_width_setting = None
 
     user_format_choice = st.selectbox(
-        "Output Format for Exported Images:",
+        "Output Format:",
         ["PNG", "JPEG", "WEBP", "AVIF"],
         index=0
     )
 
-    # New: GPT Creativity
     gpt_temperature = st.slider(
-        "GPT-4 Creativity (Temperature)",
+        "GPT-4o Creativity (Temperature)",
         min_value=0.0,
         max_value=1.0,
-        value=0.5,  # default
+        value=0.5,
         step=0.1
     )
 
-# Let user choose how to provide images
-upload_mode = st.radio(
-    "How would you like to provide images?",
-    ["Upload Images", "Upload a .zip Folder of Images"]
-)
-
+# Upload mode
+upload_mode = st.radio("Select upload method:", ["Upload Images", "Upload a .zip Folder of Images"])
 all_input_images = []
 
-# ========== Option 1: Upload Images ==========
 if upload_mode == "Upload Images":
     uploaded_files = st.file_uploader(
         "Drag & drop or select images",
@@ -293,115 +265,92 @@ if upload_mode == "Upload Images":
         key=f"uploader_{st.session_state.upload_key}"
     )
     if uploaded_files:
-        for uf in uploaded_files:
-            all_input_images.append((uf.name, uf.read()))
+        all_input_images = [(uf.name, uf.read()) for uf in uploaded_files]
 
-# ========== Option 2: Upload a .zip ==========
 elif upload_mode == "Upload a .zip Folder of Images":
     uploaded_zip = st.file_uploader(
-        "Drag & drop or select a .zip file of images",
+        "Drag & drop or select a .zip file",
         type=["zip"],
-        accept_multiple_files=False,
         key=f"zip_uploader_{st.session_state.upload_key}"
     )
     if uploaded_zip:
         with zipfile.ZipFile(uploaded_zip, "r") as zip_ref:
             for file_info in zip_ref.infolist():
-                if not file_info.is_dir():
-                    filename_lower = file_info.filename.lower()
-                    if filename_lower.endswith((".jpg", ".jpeg", ".png", ".webp", ".avif")):
-                        file_bytes = zip_ref.read(file_info.filename)
-                        base_name = os.path.basename(file_info.filename)
-                        all_input_images.append((base_name, file_bytes))
+                if not file_info.is_dir() and file_info.filename.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".avif")):
+                    base_name = os.path.basename(file_info.filename)
+                    all_input_images.append((base_name, zip_ref.read(file_info.filename)))
 
-# If images are provided, show them
+# Display images
 if all_input_images:
-    st.success(f"**Total Images Found**: {len(all_input_images)}")
+    st.success(f"**Total Images Found:** {len(all_input_images)}")
 
     if "blip_captions" not in st.session_state:
         st.session_state["blip_captions"] = {}
 
-    # Display the uploaded images as thumbnails
     st.markdown("#### Uploaded Images")
-    colA, colB, colC = st.columns(3)
-    for i, (img_name, img_bytes_data) in enumerate(all_input_images):
-        image = Image.open(io.BytesIO(img_bytes_data)).convert("RGB")
-        if i % 3 == 0:
-            col = colA
-        elif i % 3 == 1:
-            col = colB
-        else:
-            col = colC
-        col.image(image, caption=img_name, width=150)
+    cols = st.columns(3)
+    for i, (img_name, img_bytes) in enumerate(all_input_images):
+        image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        cols[i % 3].image(image, caption=img_name, width=150)
 
     st.markdown("---")
-    st.markdown("### Provide Keywords, Theme, & Location")
-    st.markdown("These will help GPT-4 optimize the alt text for SEO, including local context.")
-
+    st.markdown("### Provide Keywords, Theme & Location")
     keywords_input = st.text_input("🔑 Target keywords (comma-separated):", "")
     theme_input = st.text_input("🎨 Theme of the photos:", "")
     location_input = st.text_input("📍 Location (for local SEO):", "")
 
     if st.button("🚀 Generate & Download Alt-Optimized Images"):
         if not keywords_input.strip() or not theme_input.strip() or not location_input.strip():
-            st.warning("Please provide keywords, theme, and location to proceed.")
+            st.warning("Please provide all required fields.")
             st.stop()
 
         keywords = [k.strip() for k in keywords_input.split(",") if k.strip()]
         theme = theme_input.strip()
         location = location_input.strip()
 
-        # Create in-memory ZIP
+        # Parallel caption generation
+        def process_caption(name, data):
+            if name not in st.session_state["blip_captions"]:
+                pil_img = Image.open(io.BytesIO(data)).convert("RGB")
+                return name, blip_generate_caption(pil_img)
+            return name, st.session_state["blip_captions"][name]
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(lambda x: process_caption(*x), all_input_images))
+        for name, caption in results:
+            st.session_state["blip_captions"][name] = caption
+
+        # Prepare zip and csv
         zip_buffer = io.BytesIO()
         zipf = zipfile.ZipFile(zip_buffer, "w")
+        csv_data = [("Original Filename", "BLIP Caption", "Optimized Alt Text", "Alt Text Length", "Exported Filename")]
 
-        # Prepare CSV data
-        csv_data = [
-            ("Original Filename", "BLIP Caption", "Optimized Alt Text", "Alt Text Length", "Exported Filename")
-        ]
-
-        for img_name, img_bytes_data in all_input_images:
-            # Step A: BLIP-based caption
-            if img_name not in st.session_state["blip_captions"]:
-                with st.spinner(f"Generating BLIP caption for {img_name}..."):
-                    pil_img = Image.open(io.BytesIO(img_bytes_data)).convert("RGB")
-                    blip_caption = blip_generate_caption(pil_img)
-                    st.session_state["blip_captions"][img_name] = blip_caption
-
+        for img_name, img_bytes in all_input_images:
             blip_caption = st.session_state["blip_captions"][img_name]
 
-            # Step B: GPT-4 alt text
-            with st.spinner(f"Optimizing alt text for {img_name}..."):
-                optimized_alt_tag = optimize_alt_tag_gpt4(
-                    caption=blip_caption,
-                    keywords=keywords,
-                    theme=theme,
-                    location=location,
-                    img_name=img_name,
-                    gpt_temperature=gpt_temperature  # <-- Pass user-selected temperature
-                )
+            optimized_alt_tag = optimize_alt_tag(
+                caption=blip_caption,
+                keywords=keywords,
+                theme=theme,
+                location=location,
+                img_name=img_name,
+                gpt_temperature=gpt_temperature
+            )
 
-            # Step C: Resize if needed
-            pil_img = Image.open(io.BytesIO(img_bytes_data)).convert("RGB")
+            pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
             if resize_option and max_width_setting:
                 pil_img = resize_image(pil_img, max_width_setting)
 
-            # Step D: Export the image
-            img_bytes, exported_filename = export_image(pil_img, optimized_alt_tag, user_format_choice)
-            if img_bytes is None or exported_filename is None:
+            img_bytes_out, exported_filename = export_image(pil_img, optimized_alt_tag, user_format_choice)
+            if img_bytes_out is None:
                 continue
 
-            # Write to ZIP
-            zipf.writestr(exported_filename, img_bytes.getvalue())
-
-            # Collect CSV row
-            alt_len = len(optimized_alt_tag)
-            csv_data.append((img_name, blip_caption, optimized_alt_tag, str(alt_len), exported_filename))
+            zipf.writestr(exported_filename, img_bytes_out.getvalue())
+            csv_data.append((img_name, blip_caption, optimized_alt_tag, len(optimized_alt_tag), exported_filename))
 
         zipf.close()
         zip_buffer.seek(0)
 
-        # ---- Download ZIP
         st.download_button(
             label="📥 Download ZIP of Optimized Images",
             data=zip_buffer,
@@ -409,24 +358,17 @@ if all_input_images:
             mime="application/zip"
         )
 
-        # Create CSV in memory
         csv_buffer = io.StringIO()
         writer = csv.writer(csv_buffer)
         for row in csv_data:
             writer.writerow(row)
-        csv_bytes = csv_buffer.getvalue().encode("utf-8")
-
-        # ---- Download CSV
         st.download_button(
             label="📄 Download CSV Metadata",
-            data=csv_bytes,
+            data=csv_buffer.getvalue().encode("utf-8"),
             file_name="image_metadata.csv",
             mime="text/csv"
         )
 
-        # ---- Display Summary Table
         st.markdown("#### Summary Table")
-        headers = csv_data[0]
-        rows = csv_data[1:]
-        df = pd.DataFrame(rows, columns=headers)
+        df = pd.DataFrame(csv_data[1:], columns=csv_data[0])
         st.dataframe(df, use_container_width=True)
