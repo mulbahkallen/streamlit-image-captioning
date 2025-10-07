@@ -200,8 +200,8 @@ def resize_image(image: Image.Image, max_width: int) -> Image.Image:
 def export_image(image: Image.Image, alt_tag: str, user_format_choice: str):
     """Save the image with sanitized alt_tag as filename."""
     alt_tag_cleaned = sanitize_text(alt_tag).replace(" ", "_")
-    if len(alt_tag_cleaned) > 100:
-        st.warning("❌ Generated alt text exceeded 100 characters after cleaning.")
+    if len(alt_tag_cleaned) > 125:
+        st.warning("❌ Generated alt text exceeded 125 characters after cleaning.")
         return None, None
 
     format_mapping = {
@@ -293,7 +293,7 @@ elif upload_mode == "Upload a .zip Folder of Images":
                     all_input_images.append((base_name, zip_ref.read(file_info.filename)))
 
 # ==================================================
-# 🟢 Recommended Patch: Safe Threaded Captioning
+# 🟢 Threaded Captioning
 # ==================================================
 if all_input_images:
     st.success(f"**Total Images Found:** {len(all_input_images)}")
@@ -302,7 +302,6 @@ if all_input_images:
     if "blip_captions" not in st.session_state:
         st.session_state["blip_captions"] = {}
 
-    # Use a local cache for thread safety
     captions_cache = st.session_state["blip_captions"]
 
     st.markdown("#### Uploaded Images")
@@ -332,15 +331,12 @@ if all_input_images:
                 return name, blip_generate_caption(pil_img)
             return name, captions_cache[name]
 
-        # Run BLIP captioning in parallel
         with ThreadPoolExecutor(max_workers=4) as executor:
             results = list(executor.map(lambda x: process_caption(*x), all_input_images))
 
-        # Update session state with results
         for name, caption in results:
             captions_cache[name] = caption
 
-        # Prepare zip and csv
         zip_buffer = io.BytesIO()
         zipf = zipfile.ZipFile(zip_buffer, "w")
         csv_data = [("Original Filename", "BLIP Caption", "Optimized Alt Text", "Alt Text Length", "Exported Filename")]
