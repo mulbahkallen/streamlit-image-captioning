@@ -54,7 +54,7 @@ def sanitize_text(text: str) -> str:
     return re.sub(r"[^\w\s.,'’\-]", "", text)
 
 def blip_generate_caption(image: Image.Image) -> str:
-    """Generate a descriptive caption using BLIP with improved settings."""
+    """Generate a descriptive caption using BLIP."""
     inputs = processor(image, return_tensors="pt")
     with torch.no_grad():
         output = blip_model.generate(
@@ -81,10 +81,12 @@ def optimize_alt_tag(
     theme: str,
     location: str,
     img_name: str,
-    gpt_temperature: float
+    gpt_temperature: float,
+    additional_context: str = ""
 ) -> str:
     """
-    Generate optimized alt text under 125 chars including all keywords and location.
+    Generate optimized alt text under 125 chars including all keywords, location,
+    and optional user-provided context.
     """
 
     # -------------------------------
@@ -94,20 +96,22 @@ def optimize_alt_tag(
     theme = sanitize_text(theme)
     location = sanitize_text(location)
     img_name = sanitize_text(img_name)
+    additional_context = sanitize_text(additional_context)
     keywords = [sanitize_text(k) for k in keywords]
 
     # -------------------------------
-    # Stricter System Prompt (125-char limit)
+    # Stricter System Prompt
     # -------------------------------
     system_prompt = (
         "You are a strict SEO assistant.\n"
         "Rules for alt text:\n"
         "1. Must be **under 125 characters** (hard limit).\n"
         "2. Must include **all provided keywords** and the **location**.\n"
-        "3. Must describe the subject naturally and clearly for visually impaired users.\n"
-        "4. Do **NOT** use phrases like 'image of', 'photo of', or similar.\n"
-        "5. If you cannot meet all requirements in <125 chars, shorten wording aggressively.\n"
-        "6. Do not include explanations or notes — only return the alt text itself."
+        "3. Use the additional context (if provided) to ensure accuracy.\n"
+        "4. Must describe the subject naturally and clearly for visually impaired users.\n"
+        "5. Do **NOT** use phrases like 'image of', 'photo of', or similar.\n"
+        "6. If you cannot meet all requirements in <125 chars, shorten wording aggressively.\n"
+        "7. Do not include explanations or notes — only return the alt text itself."
     )
 
     # -------------------------------
@@ -118,9 +122,11 @@ def optimize_alt_tag(
         f"Filename: '{img_name}'\n"
         f"Keywords: {', '.join(keywords)}\n"
         f"Theme: {theme}\n"
-        f"Location: {location}\n\n"
+        f"Location: {location}\n"
+        f"Additional Context (if any): {additional_context}\n\n"
         "Your task: Return a **single alt text string** under 125 characters that naturally "
-        "includes all the keywords and the location.\n"
+        "includes all the keywords and the location, and uses the additional context if it "
+        "improves accuracy.\n"
         "Do not use filler like 'image of'. Return ONLY the alt text."
     )
 
@@ -148,15 +154,16 @@ def optimize_alt_tag(
     attempts = 0
     while attempts < 3:
         if len(alt_tag) <= 125 and has_all_required_elements(alt_tag, keywords, location):
-            break  # Success
+            break
         attempts += 1
 
         retry_prompt = (
             f"Previous attempt: '{alt_tag}'\n"
             f"Required keywords: {', '.join(keywords)}\n"
-            f"Required location: {location}\n\n"
-            "Revise the alt text so it is **under 125 characters** and includes all required terms. "
-            "Be concise and descriptive. Return ONLY the alt text."
+            f"Required location: {location}\n"
+            f"Additional context: {additional_context}\n\n"
+            "Revise the alt text so it is **under 125 characters**, includes all required terms, "
+            "and leverages context if provided. Be concise and descriptive. Return ONLY the alt text."
         )
 
         try:
@@ -179,11 +186,10 @@ def optimize_alt_tag(
     # -------------------------------
     if len(alt_tag) > 125 or not has_all_required_elements(alt_tag, keywords, location):
         st.warning("⚠️ Used fallback alt text due to compliance issues.")
-        # Debug info
         st.info(f"Debug → Generated: '{alt_tag}' | Length: {len(alt_tag)} | "
                 f"Missing: {[kw for kw in keywords if kw.lower() not in alt_tag.lower()]} | "
                 f"Location OK: {location.lower() in alt_tag.lower()}")
-        fallback = (caption + " " + " ".join(keywords) + " " + location)[:125]
+        fallback = (caption + " " + additional_context + " " + " ".join(keywords) + " " + location)[:125]
         return fallback
 
     return alt_tag
@@ -238,7 +244,7 @@ if st.button("Reset App"):
 st.markdown("""
 **Welcome!**  
 1. Upload images or a **.zip folder** of images.  
-2. Provide **keywords**, **theme**, and **location**.  
+2. Provide **keywords**, **theme**, **location**, and (optionally) **additional context**.  
 3. BLIP generates captions; GPT optimizes them into alt text.  
 4. Download a ZIP of renamed images and a CSV metadata file.
 """)
@@ -293,12 +299,11 @@ elif upload_mode == "Upload a .zip Folder of Images":
                     all_input_images.append((base_name, zip_ref.read(file_info.filename)))
 
 # ==================================================
-# 🟢 Threaded Captioning
+# 🟢 Caption + Alt Text Generation
 # ==================================================
 if all_input_images:
     st.success(f"**Total Images Found:** {len(all_input_images)}")
 
-    # Ensure key exists
     if "blip_captions" not in st.session_state:
         st.session_state["blip_captions"] = {}
 
@@ -311,19 +316,21 @@ if all_input_images:
         cols[i % 3].image(image, caption=img_name, width=150)
 
     st.markdown("---")
-    st.markdown("### Provide Keywords, Theme & Location")
+    st.markdown("### Provide Keywords, Theme, Location & Additional Context")
     keywords_input = st.text_input("🔑 Target keywords (comma-separated):", "")
     theme_input = st.text_input("🎨 Theme of the photos:", "")
     location_input = st.text_input("📍 Location (for local SEO):", "")
+    additional_context_input = st.text_area("📝 Additional Context (optional):", "")
 
     if st.button("🚀 Generate & Download Alt-Optimized Images"):
         if not keywords_input.strip() or not theme_input.strip() or not location_input.strip():
-            st.warning("Please provide all required fields.")
+            st.warning("Please provide keywords, theme, and location.")
             st.stop()
 
         keywords = [k.strip() for k in keywords_input.split(",") if k.strip()]
         theme = theme_input.strip()
         location = location_input.strip()
+        additional_context = additional_context_input.strip()
 
         def process_caption(name, data):
             if name not in captions_cache:
@@ -350,7 +357,8 @@ if all_input_images:
                 theme=theme,
                 location=location,
                 img_name=img_name,
-                gpt_temperature=gpt_temperature
+                gpt_temperature=gpt_temperature,
+                additional_context=additional_context
             )
 
             pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
